@@ -1,0 +1,96 @@
+competitors:
+  # ── All-e / FinAI — Customer Support AI ─────────────────────────────────────
+  - name: Sierra AI
+    relevant_to: [All-e, FinAI]
+    region: US
+    keywords: [sierra, "sierra ai", "sierra.ai"]
+    twitter: sierra_ai
+    linkedin: sierra-ai
+
+  - name: Decagon AI
+    relevant_to: [All-e, FinAI]
+    region: US
+    keywords: [decagon, "decagon ai", "decagon.ai"]
+    twitter: decagon
+    linkedin: decagon-ai
+
+  - name: Gnani AI
+    relevant_to: [All-e, FinAI]
+    region: India
+    keywords: [gnani, "gnani ai", "gnani.ai"]
+    twitter: gnaniai
+    linkedin: gnani-ai
+
+  - name: Squadstack
+    relevant_to: [All-e, FinAI]
+    region: India
+    keywords: [squadstack]
+    twitter: squadstack
+    linkedin: squadstack
+
+  - name: Haptik
+    relevant_to: [All-e, FinAI]
+    region: India
+    keywords: [haptik, "haptik ai"]
+    twitter: haborz
+    linkedin: haptik
+
+  # ── Hoppr — AI Analytics ────────────────────────────────────────────────────
+  - name: Triple Whale
+    relevant_to: [Hoppr]
+    region: US
+    keywords: ["triple whale", triplewhale]
+    twitter: triplewhale
+    linkedin: triple-whale
+
+  # ── Turbo / Solutions — E-com Enablers (SE Asia) ────────────────────────────
+  - name: Intrepid
+    relevant_to: [Turbo, Solutions]
+    region: SE Asia
+    keywords: [intrepid, "intrepid ecommerce"]
+    twitter: ""
+    linkedin: ""
+
+  - name: Sirclo
+    relevant_to: [Turbo, Solutions]
+    region: SE Asia
+    keywords: [sirclo]
+    twitter: sirclo_com
+    linkedin: sirclo
+
+  - name: Anchanto
+    relevant_to: [Turbo, Solutions]
+    region: SE Asia
+    keywords: [anchanto]
+    twitter: anchanto
+    linkedin: anchanto
+
+  - name: OnPoint Vietnam
+    relevant_to: [Turbo, Solutions]
+    region: SE Asia
+    keywords: [onpoint, "onpoint vietnam", "onpoint ecommerce"]
+    twitter: ""
+    linkedin: onpoint-vietnam
+
+alert_keywords:
+  - launch
+  - funding
+  - raised
+  - partnership
+  - "new feature"
+  - acquisition
+  - series
+  - million
+  - integration
+  - "ai agent"
+  - "customer support"
+
+health_thresholds:
+  at_risk: 30
+  warning: 50
+  healthy: 70
+
+revenue_achievement:
+  red: 70
+  yellow: 90
+  green: 90

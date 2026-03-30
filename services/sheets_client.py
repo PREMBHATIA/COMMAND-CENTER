@@ -102,8 +102,26 @@ def fetch_sheet_tab(sheet_id: str, tab_name: str, force_refresh: bool = False) -
     if not data:
         return pd.DataFrame()
 
-    df = pd.DataFrame(data[1:], columns=data[0])
-    _write_cache(sheet_id, tab_name, df)
+    # Handle duplicate column names by appending suffix
+    headers = data[0]
+    seen = {}
+    unique_headers = []
+    for h in headers:
+        if h in seen:
+            seen[h] += 1
+            unique_headers.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            unique_headers.append(h)
+
+    df = pd.DataFrame(data[1:], columns=unique_headers)
+
+    # Try to cache, but don't fail if it doesn't work
+    try:
+        _write_cache(sheet_id, tab_name, df)
+    except Exception:
+        pass
+
     return df
 
 

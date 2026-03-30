@@ -25,6 +25,18 @@ SCOPES = [
 
 def _get_client() -> Optional[gspread.Client]:
     """Get authenticated gspread client. Returns None if no credentials."""
+    # Try Streamlit secrets first (for Streamlit Cloud deployment)
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+            creds = Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]), scopes=SCOPES
+            )
+            return gspread.authorize(creds)
+    except Exception:
+        pass
+
+    # Try local credentials file
     creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials/service_account.json")
     full_path = Path(__file__).parent.parent / creds_path
     if not full_path.exists():

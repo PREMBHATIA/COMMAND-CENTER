@@ -18,6 +18,14 @@ st.markdown("## 📊 Hoppr Dashboard")
 
 @st.cache_data(ttl=3600)
 def load_hoppr_daily():
+    """Load Hoppr daily data — try Sheets API first, then CSV fallback."""
+    try:
+        from services.sheets_client import fetch_hoppr_analysis
+        df = fetch_hoppr_analysis()
+        if not df.empty:
+            return df
+    except Exception:
+        pass
     csv_path = Path.home() / "Downloads" / "hoppr Dashboard - Hoppr__Anaysis.csv"
     if csv_path.exists():
         return pd.read_csv(csv_path)
@@ -25,6 +33,16 @@ def load_hoppr_daily():
 
 @st.cache_data(ttl=3600)
 def load_funnel():
+    """Load funnel data — try Sheets API first, then CSV fallback."""
+    try:
+        from services.sheets_client import fetch_sheet_tab
+        import os
+        sheet_id = os.getenv("HOPPR_SHEET_ID", "1IR6KuRhPMRj_JsF261ZEUjLlHXu6UZ33diZQRw2MqJM")
+        df = fetch_sheet_tab(sheet_id, "Final Funnel")
+        if not df.empty:
+            return df
+    except Exception:
+        pass
     csv_path = Path.home() / "Downloads" / "hoppr Dashboard - Final Funnel.csv"
     if csv_path.exists():
         return pd.read_csv(csv_path, header=None)
@@ -32,6 +50,16 @@ def load_funnel():
 
 @st.cache_data(ttl=3600)
 def load_daily_analytics():
+    """Load daily analytics — try Sheets API first, then CSV fallback."""
+    try:
+        from services.sheets_client import fetch_sheet_tab
+        import os
+        sheet_id = os.getenv("HOPPR_SHEET_ID", "1IR6KuRhPMRj_JsF261ZEUjLlHXu6UZ33diZQRw2MqJM")
+        df = fetch_sheet_tab(sheet_id, "Daily Analytics - Rohan")
+        if not df.empty:
+            return df
+    except Exception:
+        pass
     csv_path = Path.home() / "Downloads" / "hoppr Dashboard - Daily Analytics - Rohan.csv"
     if csv_path.exists():
         return pd.read_csv(csv_path, header=None)

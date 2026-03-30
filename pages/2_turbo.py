@@ -17,10 +17,21 @@ st.markdown("## 🔧 Turbo — Weekly Usage Health Scores")
 
 @st.cache_data(ttl=3600)
 def load_turbo_data():
+    """Load Turbo data — try Sheets API first, then CSV fallback."""
+    try:
+        from services.sheets_client import fetch_turbo_health_scores
+        df = fetch_turbo_health_scores()
+        if not df.empty:
+            # API returns row 1 as data, need to treat row 0 as junk header
+            if df.iloc[0, 0] == "ACCOUNT" or "ACCOUNT" in str(df.iloc[0, 0]):
+                return df
+            # If first row is junk header, skip it
+            df.columns = df.iloc[0]
+            return df.iloc[1:].reset_index(drop=True)
+    except Exception:
+        pass
     csv_path = Path.home() / "Downloads" / "Pvt Beta Consolidated Insights - Usage Health Score.csv"
     if csv_path.exists():
-        # Row 1 is "SUM of USAGESCORE,,,WEEK,,,..." (junk header)
-        # Row 2 is the real header: ACCOUNT, DISPLAY_NAME, COUNTRY_CODE, 9 Mar, 2 Mar, ...
         return pd.read_csv(csv_path, header=1)
     return pd.DataFrame()
 

@@ -263,7 +263,7 @@ with tab_sprint:
         st.dataframe(
             stories_df[["jira_id", "description", "status", "epic"]]
             .rename(columns={"jira_id": "JIRA", "description": "Story", "status": "Status", "epic": "Epic"})
-            .style.applymap(status_color, subset=["Status"]),
+            .style.map(status_color, subset=["Status"]),
             use_container_width=True, hide_index=True, height=500,
         )
 
@@ -434,7 +434,7 @@ with tab_infra:
 
         st.dataframe(
             mig_df.rename(columns={"phase": "Phase", "details": "Scope", "progress": "Progress", "status": "Status"})
-            .style.applymap(mig_status_color, subset=["Status"]),
+            .style.map(mig_status_color, subset=["Status"]),
             use_container_width=True, hide_index=True,
         )
     else:
@@ -455,7 +455,7 @@ with tab_infra:
 
         st.dataframe(
             infra_df.rename(columns={"priority": "Pri", "jira_id": "JIRA", "description": "Story", "assignee": "Assignee"})
-            .style.applymap(priority_color, subset=["Pri"]),
+            .style.map(priority_color, subset=["Pri"]),
             use_container_width=True, hide_index=True, height=400,
         )
 
@@ -614,6 +614,6 @@ with tab_support:
         st.metric("Fixed", fixed_count)
 
     st.dataframe(
-        finops_df.style.applymap(finops_color, subset=["Status"]),
+        finops_df.style.map(finops_color, subset=["Status"]),
         use_container_width=True, hide_index=True, height=400,
     )

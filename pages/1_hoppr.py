@@ -498,7 +498,7 @@ with tab_accounts:
                 "q_total": "Total Q", "q_recent": "Q (7d)",
                 "last_active": "Last Active", "days_silent": "Days Silent",
                 "trend": "Trend", "classification": "Class",
-            }).style.applymap(class_color, subset=["Class"]).applymap(trend_color, subset=["Trend"]),
+            }).style.map(class_color, subset=["Class"]).map(trend_color, subset=["Trend"]),
             use_container_width=True, height=500, hide_index=True,
         )
 

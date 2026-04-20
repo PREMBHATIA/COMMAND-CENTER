@@ -234,8 +234,8 @@ def ytd_bg(val):
 var_cols = [c for c in pnl_table.columns if "Var%" in c]
 ytd_cols = [c for c in pnl_table.columns if c.startswith("YTD")]
 styled_pnl = (pnl_table.style
-    .applymap(var_color, subset=var_cols)
-    .applymap(ytd_bg, subset=ytd_cols)
+    .map(var_color, subset=var_cols)
+    .map(ytd_bg, subset=ytd_cols)
 )
 st.dataframe(styled_pnl, use_container_width=True, hide_index=True)
 
@@ -359,8 +359,8 @@ with opex_col2:
     opex_df = pd.DataFrame(opex_table)
     ytd_opex_cols = [c for c in opex_df.columns if c in ["YTD", "AOP", "Var"]]
     styled_opex = (opex_df.style
-        .applymap(ytd_bg, subset=ytd_opex_cols)
-        .applymap(var_color_dollar, subset=["Var"])
+        .map(ytd_bg, subset=ytd_opex_cols)
+        .map(var_color_dollar, subset=["Var"])
     )
     st.dataframe(styled_opex, use_container_width=True, hide_index=True)
 
@@ -802,9 +802,9 @@ else:
 
             styled = display.style
             if "Trend" in display.columns:
-                styled = styled.applymap(trend_color, subset=["Trend"])
+                styled = styled.map(trend_color, subset=["Trend"])
             if ">180d" in display.columns:
-                styled = styled.applymap(overdue_color, subset=[">180d"])
+                styled = styled.map(overdue_color, subset=[">180d"])
             return styled
 
         # Split good AR by region

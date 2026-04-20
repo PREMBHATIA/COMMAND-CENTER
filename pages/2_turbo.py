@@ -151,7 +151,7 @@ def render_weekly_grid(account_ids, num_weeks=12, key_prefix="grid"):
         else:
             return "background-color: #1a1a2e; color: #555"
 
-    styled = display.style.applymap(color_cells, subset=show_weeks)
+    styled = display.style.map(color_cells, subset=show_weeks)
 
     st.dataframe(
         styled,

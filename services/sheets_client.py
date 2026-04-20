@@ -14,6 +14,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Sync Streamlit Cloud secrets → os.environ so os.getenv() picks them up
+try:
+    import streamlit as st
+    if hasattr(st, "secrets"):
+        for _k, _v in st.secrets.items():
+            if isinstance(_v, str) and _k not in ("gcp_service_account",):
+                os.environ.setdefault(_k, _v)
+except Exception:
+    pass
+
 CACHE_DIR = Path(__file__).parent.parent / "data" / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -1,8 +1,9 @@
-credentials/
+venv/
+.env
 .streamlit/secrets.toml
-__pycache__/
-*.pyc
+credentials/
 data/cache/
 data/uploads/
-.env
-venv/
+__pycache__/
+*.pyc
+.DS_Store

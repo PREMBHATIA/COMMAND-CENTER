@@ -22,12 +22,13 @@ def load_turbo_data():
         from services.sheets_client import fetch_turbo_health_scores
         df = fetch_turbo_health_scores()
         if not df.empty:
-            # API returns row 1 as data, need to treat row 0 as junk header
-            if df.iloc[0, 0] == "ACCOUNT" or "ACCOUNT" in str(df.iloc[0, 0]):
-                return df
-            # If first row is junk header, skip it
-            df.columns = df.iloc[0]
-            return df.iloc[1:].reset_index(drop=True)
+            # Row 0 in sheet is junk header ("SUM of USAGESCORE", "", "", "WEEK", ""...)
+            # Row 1 has real headers ("ACCOUNT", "DISPLAY_NAME", "COUNTRY_CODE", "9 Mar", "2 Mar"...)
+            # Check if first data row contains "ACCOUNT" — if so, use it as headers
+            if "ACCOUNT" in str(df.iloc[0, 0]):
+                df.columns = df.iloc[0]
+                return df.iloc[1:].reset_index(drop=True)
+            return df
     except Exception:
         pass
     csv_path = Path.home() / "Downloads" / "Pvt Beta Consolidated Insights - Usage Health Score.csv"
@@ -54,9 +55,41 @@ if st.button("🔄 Refresh Data"):
 
 week_cols = [c for c in health.columns if c not in ("account_id", "display_name", "country")]
 
+# ── Convert week column names to "Mon W1" format ────────────────────────────
+from datetime import datetime as _dt
+
+def _week_label(date_str):
+    """Convert '9 Mar' or '2025-07-14' to 'Mar W2' format."""
+    date_str = str(date_str).strip()
+    d = None
+    try:
+        # Try "9 Mar" format — guess year based on month order
+        d = _dt.strptime(date_str, "%d %b")
+        # Columns are newest-first; Dec/Nov likely 2025, rest 2026
+        year = 2025 if d.month >= 11 else 2026
+        d = d.replace(year=year)
+    except ValueError:
+        try:
+            d = _dt.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return date_str
+    week_num = (d.day - 1) // 7 + 1
+    return f"{d.strftime('%b')} W{week_num}"
+
+week_label_map = {}
+for wc in week_cols:
+    label = _week_label(wc)
+    # Avoid duplicates by appending year hint if needed
+    if label in week_label_map.values():
+        label = f"{label}'"
+    week_label_map[wc] = label
+
+health = health.rename(columns=week_label_map)
+week_cols = [week_label_map.get(wc, wc) for wc in week_cols]
+
 # ── Identify Top 50 and New Entrants ──────────────────────────────────────────
 
-top50 = trends.sort_values("current_score", ascending=False).head(50)
+top50 = trends.sort_values("current_score", ascending=False).head(30)
 top50_ids = top50["account_id"].tolist()
 
 def detect_new_entrants(health_df, week_cols, recent_n=4, old_n=8):
@@ -76,7 +109,7 @@ new_entrants = trends[trends["account_id"].isin(new_entrant_ids)].sort_values("c
 # ══════════════════════════════════════════════════════════════════════════════
 
 tab_top50, tab_new = st.tabs([
-    f"🏆 Top 50 Accounts",
+    f"🏆 Top 30 Accounts",
     f"🆕 New Entrants ({len(new_entrants)})",
 ])
 
@@ -165,23 +198,6 @@ with tab_top50:
     st.markdown("### Weekly Usage Scores")
     st.caption("🟢 70+ Healthy | 🟠 50-69 Moderate | 🟤 30-49 Warning | 🔴 <30 At Risk | ⚫ 0 Inactive")
     render_weekly_grid(filtered_ids, num_weeks=num_weeks, key_prefix="t50")
-
-    # ── WoW change sparklines ─────────────────────────────────────────────────
-    st.markdown("### Week-over-Week Changes")
-
-    wow_data = top50[["display_name", "current_score", "prev_score", "change", "trend"]].copy()
-    wow_data["trend_icon"] = wow_data["trend"].map({"improving": "📈", "stable": "➡️", "declining": "📉"})
-    wow_data["trend_display"] = wow_data["trend_icon"] + " " + wow_data["trend"]
-    wow_data = wow_data.sort_values("change", ascending=False)
-
-    st.dataframe(
-        wow_data[["display_name", "current_score", "prev_score", "change", "trend_display"]]
-        .rename(columns={
-            "display_name": "Account", "current_score": "This Week",
-            "prev_score": "Last Week", "change": "Change", "trend_display": "Trend",
-        }),
-        use_container_width=True, hide_index=True, height=400,
-    )
 
     # ── Account deep-dive chart ───────────────────────────────────────────────
     st.markdown("### Account Deep-Dive")

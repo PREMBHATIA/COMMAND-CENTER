@@ -149,6 +149,151 @@ def fetch_revenue_proposals(force_refresh: bool = False) -> pd.DataFrame:
     return fetch_sheet_tab(sheet_id, "Proposals", force_refresh)
 
 
+def fetch_alle_active_presales(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch All-e Active Presales data."""
+    sheet_id = os.getenv("ALLE_SHEET_ID", "")
+    return fetch_sheet_tab(sheet_id, "Active presales", force_refresh)
+
+
+def fetch_alle_dropped_leads(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch All-e Dropped Leads data."""
+    sheet_id = os.getenv("ALLE_SHEET_ID", "")
+    return fetch_sheet_tab(sheet_id, "Dropped leads", force_refresh)
+
+
+def fetch_alle_gtm_india(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch All-e 2026 GTM India targets."""
+    sheet_id = os.getenv("ALLE_SHEET_ID", "")
+    return fetch_sheet_tab(sheet_id, "2026 - GTM India", force_refresh)
+
+
+def fetch_ar_by_bu(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch Group AR by BU — latest weekly tab from the AR sheet.
+
+    The sheet has weekly tabs named like '28th Mar 2026', '21st Mar 2026', etc.
+    We find the latest dated tab automatically.
+    """
+    sheet_id = os.getenv("AR_SHEET_ID", "")
+    if not sheet_id:
+        return pd.DataFrame()
+
+    client = _get_client()
+    if client is None:
+        return pd.DataFrame()
+
+    try:
+        spreadsheet = client.open_by_key(sheet_id)
+        worksheets = spreadsheet.worksheets()
+
+        # Find tabs that look like dates (contain month names)
+        import re
+        from datetime import datetime as dt
+        month_pattern = re.compile(
+            r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', re.IGNORECASE
+        )
+        date_tabs = []
+        for ws in worksheets:
+            title = ws.title
+            if month_pattern.search(title) and any(c.isdigit() for c in title):
+                # Try parsing the date
+                for fmt in [
+                    "%dst %b %Y", "%dnd %b %Y", "%drd %b %Y", "%dth %b %Y",
+                    "%d %b %Y", "%d %B %Y",
+                    "%dst %B %Y", "%dnd %B %Y", "%drd %B %Y", "%dth %B %Y",
+                    "%B %Y",
+                ]:
+                    try:
+                        # Clean up the title for parsing
+                        clean = title.strip()
+                        parsed = dt.strptime(clean, fmt)
+                        date_tabs.append((parsed, ws))
+                        break
+                    except ValueError:
+                        continue
+
+        if not date_tabs:
+            return pd.DataFrame()
+
+        # Sort by date descending, pick the latest
+        date_tabs.sort(key=lambda x: x[0], reverse=True)
+        latest_ws = date_tabs[0][1]
+        latest_tab_name = latest_ws.title
+
+        # Check cache first
+        if not force_refresh:
+            cached = _read_cache(sheet_id, latest_tab_name)
+            if cached is not None:
+                return cached
+
+        data = latest_ws.get_all_values()
+        if not data:
+            return pd.DataFrame()
+
+        # Return raw data as DataFrame (no header processing — the page will handle it)
+        df = pd.DataFrame(data)
+
+        try:
+            _write_cache(sheet_id, latest_tab_name, df)
+        except Exception:
+            pass
+
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def fetch_ar_monthly_snapshots(force_refresh: bool = False) -> dict:
+    """Fetch AR data from end-of-month tabs for monthly comparison.
+
+    Returns dict like {'Jan': DataFrame, 'Feb': DataFrame, 'Mar': DataFrame}
+    Each DataFrame is raw (same format as fetch_ar_by_bu).
+    """
+    sheet_id = os.getenv("AR_SHEET_ID", "")
+    if not sheet_id:
+        return {}
+
+    # Known end-of-month tab names
+    monthly_tabs = {
+        "Jan": "31st Jan 2026",
+        "Feb": "27th Feb 2026",
+        "Mar": "28th Mar 2026",
+    }
+
+    result = {}
+    client = None
+
+    for month, tab_name in monthly_tabs.items():
+        # Check cache first
+        cache_key = f"ar_monthly_{tab_name}"
+        if not force_refresh:
+            cached = _read_cache(sheet_id, cache_key)
+            if cached is not None:
+                result[month] = cached
+                continue
+
+        # Lazy-init client
+        if client is None:
+            client = _get_client()
+            if client is None:
+                return result
+
+        try:
+            spreadsheet = client.open_by_key(sheet_id)
+            ws = spreadsheet.worksheet(tab_name)
+            data = ws.get_all_values()
+            if data:
+                df = pd.DataFrame(data)
+                try:
+                    _write_cache(sheet_id, cache_key, df)
+                except Exception:
+                    pass
+                result[month] = df
+        except Exception:
+            continue
+
+    return result
+
+
 def load_from_csv(csv_path: str) -> pd.DataFrame:
     """Load data from a local CSV file (fallback when no API credentials)."""
     return pd.read_csv(csv_path)

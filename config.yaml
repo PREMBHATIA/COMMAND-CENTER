@@ -35,6 +35,13 @@ competitors:
     twitter: haborz
     linkedin: haptik
 
+  - name: Happy Robot
+    relevant_to: [All-e]
+    region: US
+    keywords: ["happy robot", "happyrobot.ai", "happyrobot ai"]
+    twitter: happyrobotai
+    linkedin: happyrobot-ai
+
   # ── Hoppr — AI Analytics ────────────────────────────────────────────────────
   - name: Triple Whale
     relevant_to: [Hoppr]
@@ -47,9 +54,9 @@ competitors:
   - name: Intrepid
     relevant_to: [Turbo, Solutions]
     region: SE Asia
-    keywords: [intrepid, "intrepid ecommerce"]
+    keywords: ["intrepid ecommerce SEA", "intrepid group ecommerce", "intrepid southeast asia"]
     twitter: ""
-    linkedin: ""
+    linkedin: intrepid-group
 
   - name: Sirclo
     relevant_to: [Turbo, Solutions]
@@ -71,6 +78,62 @@ competitors:
     keywords: [onpoint, "onpoint vietnam", "onpoint ecommerce"]
     twitter: ""
     linkedin: onpoint-vietnam
+
+  # ── Supply Chain / EDI / Integration ────────────────────────────────────────
+  - name: SPS Commerce
+    relevant_to: [Execute, Turbo]
+    region: US
+    keywords: ["sps commerce", spscommerce]
+    twitter: saborcommerce
+    linkedin: sps-commerce
+    website: https://www.spscommerce.com/
+    notes: "Cloud-based retail supply chain platform — EDI, analytics, fulfillment. ~$751M FY2025."
+
+  - name: Celigo
+    relevant_to: [Execute, Turbo]
+    region: US
+    keywords: [celigo, "celigo ipaas", "celigo integration"]
+    twitter: caborgo
+    linkedin: celigo
+    website: https://www.celigo.com/
+    notes: "iPaaS — e-commerce/retail integrations (NetSuite, Shopify, Amazon). ~$173M est."
+
+  - name: DCKAP Integrator
+    relevant_to: [Execute, Turbo]
+    region: US
+    keywords: [dckap, "dckap integrator", "dckap erp"]
+    twitter: dborrap
+    linkedin: dckap
+    website: https://www.dckap.com/integrator
+    notes: "ERP-first integration platform for manufacturers/distributors. ~$27-32M."
+
+  # ── Field Sales / SFA / Retail Execution ────────────────────────────────────
+  - name: FieldAssist
+    relevant_to: [All-e, Execute]
+    region: India
+    keywords: [fieldassist, "field assist", "fieldassist SFA"]
+    twitter: fieldassist
+    linkedin: fieldassist
+    website: https://www.fieldassist.com/
+    notes: "AI-powered SFA/DMS for CPG brands. ~$8-10M ARR."
+
+  - name: Aforza
+    relevant_to: [All-e, Execute]
+    region: US
+    keywords: [aforza, "aforza CPG"]
+    twitter: aforza
+    linkedin: aforza
+    website: https://aforza.com/
+    notes: "Cloud-native commercial execution for CPG — retail execution, TPM, SFA. ~$22M."
+
+  - name: BeatRoute
+    relevant_to: [All-e, Execute]
+    region: India
+    keywords: [beatroute, "beat route", "beatroute SFA"]
+    twitter: beatrouteapp
+    linkedin: beatroute
+    website: https://beatroute.io/
+    notes: "SFA and retail execution for CPG/FMCG brands. ~$9.7M."
 
 alert_keywords:
   - launch

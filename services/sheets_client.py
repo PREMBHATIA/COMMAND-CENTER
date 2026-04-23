@@ -135,6 +135,37 @@ def fetch_sheet_tab(sheet_id: str, tab_name: str, force_refresh: bool = False) -
     return df
 
 
+def fetch_sheet_tab_raw(sheet_id: str, tab_name: str, force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch a sheet tab as a raw grid (no header row processing) — like pd.read_csv(header=None).
+    Returns a DataFrame with integer column indices (0, 1, 2, ...) and all rows including row 0.
+    """
+    cache_key = f"raw_{tab_name}"
+    if not force_refresh:
+        cached = _read_cache(sheet_id, cache_key)
+        if cached is not None:
+            return cached
+
+    client = _get_client()
+    if client is None:
+        cached = _read_cache(sheet_id, cache_key, max_age_hours=99999)
+        return cached if cached is not None else pd.DataFrame()
+
+    try:
+        spreadsheet = client.open_by_key(sheet_id)
+        worksheet = spreadsheet.worksheet(tab_name)
+        data = worksheet.get_all_values()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        try:
+            _write_cache(sheet_id, cache_key, df)
+        except Exception:
+            pass
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def fetch_hoppr_analysis(force_refresh: bool = False) -> pd.DataFrame:
     """Fetch Hoppr analysis data."""
     sheet_id = os.getenv("HOPPR_SHEET_ID", "")

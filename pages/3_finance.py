@@ -48,7 +48,19 @@ def format_money_short(val):
 
 @st.cache_data(ttl=3600)
 def load_pnl_data():
-    """Load P&L Summary — source of truth from Finance."""
+    """Load P&L Summary — try Sheets API first, then CSV fallback."""
+    # Try Google Sheets API (returns raw grid matching CSV header=None layout)
+    try:
+        from services.sheets_client import fetch_sheet_tab_raw
+        import os
+        sheet_id = os.getenv("FINANCE_SHEET_ID", "")
+        if sheet_id:
+            df = fetch_sheet_tab_raw(sheet_id, "Summary")
+            if not df.empty:
+                return df
+    except Exception:
+        pass
+    # CSV fallback
     csv_path = Path.home() / "Downloads" / "Graas FY 2026 Actuals.xlsx - Summary.csv"
     if csv_path.exists():
         return pd.read_csv(csv_path, header=None)

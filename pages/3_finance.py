@@ -47,30 +47,39 @@ def format_money_short(val):
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600)
-def load_pnl_data():
-    """Load P&L Summary — try Sheets API first, then CSV fallback."""
-    # Try Google Sheets API (returns raw grid matching CSV header=None layout)
-    try:
-        from services.sheets_client import fetch_sheet_tab_raw
-        import os
-        sheet_id = os.getenv("FINANCE_SHEET_ID", "")
-        if sheet_id:
-            df = fetch_sheet_tab_raw(sheet_id, "Summary")
-            if not df.empty:
-                return df
-    except Exception:
-        pass
-    # CSV fallback
+def load_pnl_from_excel(file_bytes: bytes) -> pd.DataFrame:
+    """Parse Summary tab from uploaded Excel bytes."""
+    import io
+    xl = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
+    df = xl.parse("Summary", header=None)
+    return df
+
+def load_pnl_data(file_bytes=None):
+    """Load P&L Summary — uploaded Excel first, then local CSV fallback."""
+    if file_bytes is not None:
+        return load_pnl_from_excel(file_bytes)
+    # Local CSV fallback (works when running locally)
     csv_path = Path.home() / "Downloads" / "Graas FY 2026 Actuals.xlsx - Summary.csv"
     if csv_path.exists():
         return pd.read_csv(csv_path, header=None)
     return pd.DataFrame()
 
-raw_pnl = load_pnl_data()
+# ── File upload ───────────────────────────────────────────────────────────────
+col_btn, col_up = st.columns([1, 3])
+with col_btn:
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+with col_up:
+    uploaded = st.file_uploader(
+        "Upload **Graas FY 2026 Actuals.xlsx**",
+        type=["xlsx"],
+        label_visibility="collapsed",
+        key="finance_upload",
+    )
 
-if st.button("🔄 Refresh Data"):
-    st.cache_data.clear()
-    st.rerun()
+file_bytes = uploaded.read() if uploaded else None
+raw_pnl = load_pnl_data(file_bytes)
 
 # ── Parse P&L Summary ───────────────────────────────────────────────────────
 # Structure: 3 column blocks — Actuals (3-21), AOP (23-41), Variance (43-61)

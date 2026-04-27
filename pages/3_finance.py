@@ -510,7 +510,7 @@ else:
     with hc4:
         st.metric("Exits (YTD+)", total_exited)
 
-    hc_tab_summary, hc_tab_bu = st.tabs(["📊 HC Summary", "💵 Cost by BU"])
+    hc_tab_summary, hc_tab_bu, hc_tab_div = st.tabs(["📊 HC Summary", "💵 Cost by BU", "🏢 Solutions vs Platform"])
 
     # ── HC Summary Tab ──────────────────────────────────────────────
     with hc_tab_summary:
@@ -594,6 +594,109 @@ else:
             st.caption(f"**Total:** {total_active} employees | Monthly: {format_money(monthly_burn)} | Annual Fixed: {format_money(annual_fixed)}")
         else:
             st.info("BU or compensation columns not found in headcount data.")
+
+    # ── Solutions vs Platform Tab ───────────────────────────────────
+    with hc_tab_div:
+        if 'division' in col_map:
+            st.markdown("#### Solutions (incl. Turbo) vs Platform (incl. EBU)")
+            st.caption("Based on Division column — Solutions includes MP, ABU, Tech, FinOps; Platform includes EBU, GAF, Product, Shared")
+
+            def classify_division(div):
+                d = str(div).strip().replace('\\', '')
+                if d.startswith('Solution'):
+                    return 'Solutions'
+                elif d.startswith('Platform'):
+                    return 'Platform'
+                elif d in ('Founders', 'G&A', 'G\\&A'):
+                    return 'G&A / Founders'
+                return 'Other'
+
+            def get_sub_division(div):
+                d = str(div).strip().replace('\\', '')
+                if '_' in d:
+                    return d.split('_', 1)[1]
+                return d
+
+            active['_group'] = active[col_map['division']].apply(classify_division)
+            active['_sub'] = active[col_map['division']].apply(get_sub_division)
+
+            # Top-level comparison
+            group_data = active.groupby('_group').agg(
+                HC=(col_map['division'], 'count'),
+                Monthly_USD=(col_map['monthly_usd'], 'sum') if 'monthly_usd' in col_map else (col_map['division'], 'count'),
+                Annual_Fixed=(col_map['annual_fixed_usd'], 'sum') if 'annual_fixed_usd' in col_map else (col_map['division'], 'count'),
+            ).reset_index()
+
+            div_c1, div_c2 = st.columns(2)
+
+            with div_c1:
+                fig_div_hc = go.Figure()
+                colors = {'Solutions': '#4F46E5', 'Platform': '#7C3AED', 'G&A / Founders': '#6B7280', 'Other': '#9CA3AF'}
+                fig_div_hc.add_trace(go.Bar(
+                    x=group_data['_group'], y=group_data['HC'],
+                    marker_color=[colors.get(g, '#9CA3AF') for g in group_data['_group']],
+                    text=group_data['HC'], textposition='outside',
+                ))
+                fig_div_hc.update_layout(height=300, template="plotly_dark",
+                                          title="Headcount", yaxis_title="Employees",
+                                          margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig_div_hc, use_container_width=True)
+
+            with div_c2:
+                if 'monthly_usd' in col_map:
+                    fig_div_cost = go.Figure()
+                    fig_div_cost.add_trace(go.Bar(
+                        x=group_data['_group'], y=group_data['Monthly_USD'],
+                        marker_color=[colors.get(g, '#9CA3AF') for g in group_data['_group']],
+                        text=[format_money(v) for v in group_data['Monthly_USD']],
+                        textposition='outside',
+                    ))
+                    fig_div_cost.update_layout(height=300, template="plotly_dark",
+                                                title="Monthly Payroll", yaxis_title="USD",
+                                                margin=dict(l=20, r=20, t=40, b=20))
+                    st.plotly_chart(fig_div_cost, use_container_width=True)
+
+            # Summary table
+            group_display = group_data.copy()
+            group_display.columns = ['Group', 'HC', 'Monthly Cost', 'Annual Fixed']
+            if 'monthly_usd' in col_map:
+                group_display['Monthly Cost'] = group_display['Monthly Cost'].apply(format_money)
+                group_display['Annual Fixed'] = group_display['Annual Fixed'].apply(format_money)
+                group_display['% of Total HC'] = (group_data['HC'] / total_active * 100).apply(lambda v: f"{v:.0f}%")
+            st.dataframe(group_display, use_container_width=True, hide_index=True)
+
+            # Sub-division breakdown
+            st.markdown("#### Breakdown by Sub-Division")
+
+            sub_data = active.groupby(['_group', '_sub']).agg(
+                HC=(col_map['division'], 'count'),
+                Monthly_USD=(col_map['monthly_usd'], 'sum') if 'monthly_usd' in col_map else (col_map['division'], 'count'),
+            ).reset_index().sort_values(['_group', 'Monthly_USD'], ascending=[True, False])
+
+            sol_col, plat_col = st.columns(2)
+
+            with sol_col:
+                st.markdown("**Solutions**")
+                sol_sub = sub_data[sub_data['_group'] == 'Solutions'].copy()
+                if not sol_sub.empty:
+                    sol_display = sol_sub[['_sub', 'HC', 'Monthly_USD']].copy()
+                    sol_display.columns = ['Sub-Division', 'HC', 'Monthly Cost']
+                    sol_display['Monthly Cost'] = sol_display['Monthly Cost'].apply(format_money)
+                    st.dataframe(sol_display, use_container_width=True, hide_index=True)
+
+            with plat_col:
+                st.markdown("**Platform**")
+                plat_sub = sub_data[sub_data['_group'] == 'Platform'].copy()
+                if not plat_sub.empty:
+                    plat_display = plat_sub[['_sub', 'HC', 'Monthly_USD']].copy()
+                    plat_display.columns = ['Sub-Division', 'HC', 'Monthly Cost']
+                    plat_display['Monthly Cost'] = plat_display['Monthly Cost'].apply(format_money)
+                    st.dataframe(plat_display, use_container_width=True, hide_index=True)
+
+            # Clean up temp columns
+            active.drop(columns=['_group', '_sub'], inplace=True, errors='ignore')
+        else:
+            st.info("Division column not found in headcount data.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

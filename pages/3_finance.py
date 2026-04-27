@@ -58,17 +58,23 @@ def load_pnl_from_excel(file_bytes: bytes) -> pd.DataFrame:
     # Fall back to first sheet
     return xl.parse(xl.sheet_names[0], header=None)
 
-def load_pnl_data(file_bytes=None):
-    """Load P&L Summary — uploaded Excel first, then local CSV fallback."""
-    if file_bytes is not None:
-        return load_pnl_from_excel(file_bytes)
-    # Local CSV fallback (works when running locally)
-    csv_path = Path.home() / "Downloads" / "Graas FY 2026 Actuals.xlsx - Summary.csv"
-    if csv_path.exists():
-        return pd.read_csv(csv_path, header=None)
-    return pd.DataFrame()
+@st.cache_data(ttl=3600)
+def load_pnl_from_drive() -> tuple[pd.DataFrame, str | None]:
+    """Auto-load P&L Summary from the Graas FY 2026 Actuals .xlsx in Drive."""
+    import os
+    file_id = os.getenv("FINANCE_PNL_FILE_ID", "")
+    if not file_id:
+        return pd.DataFrame(), "FINANCE_PNL_FILE_ID not set in secrets."
+    try:
+        from services.sheets_client import fetch_drive_file_bytes
+        data = fetch_drive_file_bytes(file_id)
+        if data is None:
+            return pd.DataFrame(), "Service account credentials not configured."
+        return load_pnl_from_excel(data), None
+    except Exception as e:
+        return pd.DataFrame(), f"{type(e).__name__}: {e}"
 
-# ── File upload ───────────────────────────────────────────────────────────────
+# ── Refresh + manual override ─────────────────────────────────────────────────
 col_btn, col_up = st.columns([1, 3])
 with col_btn:
     if st.button("🔄 Refresh Data"):
@@ -76,14 +82,20 @@ with col_btn:
         st.rerun()
 with col_up:
     uploaded = st.file_uploader(
-        "Upload **Graas FY 2026 Actuals.xlsx**",
+        "Override: upload Graas FY 2026 Actuals.xlsx (only if Drive auto-load fails)",
         type=["xlsx"],
         label_visibility="collapsed",
         key="finance_upload",
     )
 
-file_bytes = uploaded.read() if uploaded else None
-raw_pnl = load_pnl_data(file_bytes)
+if uploaded is not None:
+    raw_pnl = load_pnl_from_excel(uploaded.read())
+    pnl_err = None
+else:
+    raw_pnl, pnl_err = load_pnl_from_drive()
+
+if raw_pnl.empty and pnl_err:
+    st.error(f"P&L auto-load failed — {pnl_err}")
 
 # ── Parse P&L Summary ───────────────────────────────────────────────────────
 # Structure: 3 column blocks — Actuals (3-21), AOP (23-41), Variance (43-61)

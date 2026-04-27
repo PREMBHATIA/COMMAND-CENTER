@@ -225,6 +225,21 @@ def _get_service_account_creds() -> Optional[Credentials]:
     return Credentials.from_service_account_file(str(full_path), scopes=SCOPES)
 
 
+def fetch_drive_file_bytes(file_id: str) -> Optional[bytes]:
+    """Download a Drive file's raw bytes via the service account.
+    Returns None if creds aren't configured. Raises on HTTP errors.
+    """
+    creds = _get_service_account_creds()
+    if creds is None:
+        return None
+    import google.auth.transport.requests as greq
+    session = greq.AuthorizedSession(creds)
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    resp = session.get(url)
+    resp.raise_for_status()
+    return resp.content
+
+
 def fetch_drive_xlsx_tab(file_id: str, tab_name: str, force_refresh: bool = False) -> pd.DataFrame:
     """Download an .xlsx file from Drive and read a single tab into a DataFrame.
 

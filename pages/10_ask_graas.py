@@ -402,10 +402,11 @@ if user_input:
                     {"role": "assistant", "content": assistant_msg}
                 )
 
-            except anthropic.AuthenticationError:
-                st.error("Invalid API key. Check your `ANTHROPIC_API_KEY` in `.env`.")
             except Exception as e:
-                st.error(f"Error: {e}")
+                if "authentication" in str(e).lower() or "AuthenticationError" in type(e).__name__:
+                    st.error("Invalid API key. Check your `ANTHROPIC_API_KEY` in `.env`.")
+                else:
+                    st.error(f"Error: {e}")
 
 # Sidebar controls
 with st.sidebar:

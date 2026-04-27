@@ -51,8 +51,12 @@ def load_pnl_from_excel(file_bytes: bytes) -> pd.DataFrame:
     """Parse Summary tab from uploaded Excel bytes."""
     import io
     xl = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
-    df = xl.parse("Summary", header=None)
-    return df
+    # Try common tab names
+    for name in xl.sheet_names:
+        if "summary" in name.lower():
+            return xl.parse(name, header=None)
+    # Fall back to first sheet
+    return xl.parse(xl.sheet_names[0], header=None)
 
 def load_pnl_data(file_bytes=None):
     """Load P&L Summary — uploaded Excel first, then local CSV fallback."""

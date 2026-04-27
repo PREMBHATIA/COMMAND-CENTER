@@ -171,10 +171,53 @@ def load_all_data():
             summaries["alle_pipeline"] = {
                 "total_leads": len(alle_df),
                 "columns": list(alle_df.columns)[:15],
-                "sample": alle_df.head(5).to_dict("records"),
+                "sample": alle_df.head(10).to_dict("records"),
             }
     except Exception as e:
         summaries["alle_pipeline"] = f"Error loading: {e}"
+
+    # ── Meeting Notes (from Slack / Granola) ─────────────────────────
+    try:
+        from services.notes_store import get_all_notes
+        notes = get_all_notes()
+        if notes:
+            summaries["meeting_notes"] = [
+                {
+                    "client": n.get("client", ""),
+                    "date": n.get("date", ""),
+                    "author": n.get("author", ""),
+                    "channel": n.get("channel", ""),
+                    "summary": n.get("summary", ""),
+                    "takeaways": n.get("takeaways", []),
+                    "has_granola": bool(n.get("granola")),
+                    "source": n.get("source", ""),
+                }
+                for n in notes[:30]  # last 30 notes
+            ]
+    except Exception:
+        pass
+
+    # ── Slack live notes (if no stored notes) ────────────────────────
+    if "meeting_notes" not in summaries:
+        try:
+            from services.slack_notes import fetch_meeting_notes
+            slack_notes = fetch_meeting_notes(lookback_days=30)
+            if slack_notes:
+                summaries["meeting_notes"] = [
+                    {
+                        "client": n.get("client", ""),
+                        "date": n.get("date", ""),
+                        "author": n.get("author", ""),
+                        "channel": n.get("channel", ""),
+                        "summary": n.get("summary", ""),
+                        "takeaways": n.get("takeaways", []),
+                        "has_granola": bool(n.get("granola")),
+                        "source": "slack",
+                    }
+                    for n in slack_notes[:30]
+                ]
+        except Exception:
+            pass
 
     return summaries
 
@@ -188,7 +231,7 @@ def build_system_prompt(data):
 
     if "finance_pnl" in data and isinstance(data["finance_pnl"], dict):
         pnl = data["finance_pnl"]
-        context_parts.append("=== FINANCE P&L (FY 2026) ===")
+        context_parts.append("=== FINANCE P&L (FY 2026) === [Source: Finance P&L Sheet]")
         for key, vals in pnl.items():
             if isinstance(vals, dict):
                 act = vals.get("ytd_actual", 0)
@@ -201,7 +244,7 @@ def build_system_prompt(data):
 
     if "ar" in data and isinstance(data["ar"], dict):
         ar = data["ar"]
-        context_parts.append("\n=== ACCOUNTS RECEIVABLE ===")
+        context_parts.append("\n=== ACCOUNTS RECEIVABLE === [Source: AR Sheet]")
         context_parts.append(f"Total Net AR: ${ar['total_ar']:,.0f}")
         context_parts.append(f"India AR: ${ar['india_ar']:,.0f}")
         context_parts.append(f"SEA AR: ${ar['sea_ar']:,.0f}")
@@ -216,27 +259,38 @@ def build_system_prompt(data):
             )
 
     if "hoppr" in data and isinstance(data["hoppr"], dict):
-        context_parts.append(f"\n=== HOPPR (AI Analytics) ===")
+        context_parts.append(f"\n=== HOPPR (AI Analytics) === [Source: Hoppr Dashboard Sheet]")
         context_parts.append(f"Total rows: {data['hoppr']['rows']}")
         context_parts.append(f"Columns: {data['hoppr']['columns']}")
 
     if "hoppr_daily" in data and isinstance(data["hoppr_daily"], dict):
-        context_parts.append(f"\n=== HOPPR DAILY ANALYTICS ===")
+        context_parts.append(f"\n=== HOPPR DAILY ANALYTICS === [Source: Hoppr Daily Analytics Sheet]")
         context_parts.append(f"Active sellers tracked: {data['hoppr_daily']['rows']}")
         context_parts.append(f"Columns: {data['hoppr_daily']['columns']}")
         context_parts.append(f"Sample rows: {json.dumps(data['hoppr_daily']['sample'][:2], default=str)}")
 
     if "turbo" in data and isinstance(data["turbo"], dict):
-        context_parts.append(f"\n=== TURBO (Usage Health Scores) ===")
+        context_parts.append(f"\n=== TURBO (Usage Health Scores) === [Source: Turbo Health Score Sheet]")
         context_parts.append(f"Total accounts: {data['turbo']['total_accounts']}")
         context_parts.append(f"Columns: {data['turbo']['columns']}")
         context_parts.append(f"Sample: {json.dumps(data['turbo']['sample'][:2], default=str)}")
 
     if "alle_pipeline" in data and isinstance(data["alle_pipeline"], dict):
-        context_parts.append(f"\n=== ALL-E PRESALES PIPELINE ===")
+        context_parts.append(f"\n=== ALL-E PRESALES PIPELINE === [Source: Presales Tracker Sheet]")
         context_parts.append(f"Total active leads: {data['alle_pipeline']['total_leads']}")
         context_parts.append(f"Columns: {data['alle_pipeline']['columns']}")
-        context_parts.append(f"Sample: {json.dumps(data['alle_pipeline']['sample'][:2], default=str)}")
+        context_parts.append(f"Sample: {json.dumps(data['alle_pipeline']['sample'], default=str)}")
+
+    if "meeting_notes" in data and isinstance(data["meeting_notes"], list):
+        context_parts.append(f"\n=== MEETING NOTES ({len(data['meeting_notes'])} recent) === [Source: Slack GTM channels / Granola]")
+        for note in data["meeting_notes"]:
+            source_tag = "Granola notes" if note.get("has_granola") else "Slack message only (no Granola)"
+            parts = [f"  Client: {note['client']} | Date: {note['date']} | By: {note['author']} | Channel: {note['channel']} | Source: {source_tag}"]
+            if note.get("summary"):
+                parts.append(f"    Summary: {note['summary'][:300]}")
+            if note.get("takeaways"):
+                parts.append(f"    Takeaways: {'; '.join(note['takeaways'][:5])}")
+            context_parts.append("\n".join(parts))
 
     data_context = "\n".join(context_parts)
 
@@ -258,6 +312,8 @@ RULES:
 - BUs are: ABU, EBU, Marketplace, Platform.
 - Regions: India and SEA.
 - When asked for a "board summary" or "brief", structure it as: GP, Revenue, EBITDA, AR, Pipeline.
+- **ALWAYS cite your source** for every claim. Use the [Source: ...] tags from the data sections above. For example: "Nerolac is at TOF stage *(Presales Tracker Sheet)* with a deep-dive meeting scheduled *(Slack GTM / Granola notes, 14 Apr)*". This lets the reader verify the information.
+- When referencing meeting notes, mention the date, who posted them, and whether Granola notes exist.
 """
 
 

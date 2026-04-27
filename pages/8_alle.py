@@ -499,23 +499,48 @@ with tab_notes:
         ]
 
     if is_live:
-        st.success(f"🔴 Live — {len(slack_recaps)} meeting note(s) from Slack (last 30 days)")
+        missing_count = sum(1 for r in slack_recaps if r.get("missing_granola"))
+        status_msg = f"🔴 Live — {len(slack_recaps)} meeting note(s) from Slack (last 30 days)"
+        if missing_count:
+            status_msg += f" — **{missing_count} missing Granola notes**"
+        st.success(status_msg)
     else:
         st.info("📸 Showing cached snapshot — add `SLACK_BOT_TOKEN` to `.env` to enable live refresh")
 
+    # Show meetings missing Granola notes first as a warning block
+    missing_granola = [r for r in slack_recaps if r.get("missing_granola")]
+    if missing_granola:
+        st.warning(f"⚠️ **{len(missing_granola)} meeting(s) without Granola notes** — follow up to get notes recorded")
+        for recap in missing_granola:
+            st.markdown(f"- **{recap['client']}** — {recap['date']} — {recap['author']} ({recap['channel']})")
+        st.markdown("---")
+
     for recap in slack_recaps:
         takeaway_count = len(recap["takeaways"])
-        label = f"📋 **{recap['client']}** — {recap['date']} — {recap['author']} — {recap['channel']}"
+        if recap.get("missing_granola"):
+            icon = "⚠️"
+            flag = " — **NO GRANOLA NOTES**"
+        else:
+            icon = "📋"
+            flag = ""
+        label = f"{icon} **{recap['client']}** — {recap['date']} — {recap['author']} — {recap['channel']}"
         if takeaway_count:
             label += f" — {takeaway_count} action(s)"
+        label += flag
 
         with st.expander(label):
+            if recap.get("missing_granola"):
+                st.error("No Granola notes shared for this meeting. Please follow up with the attendee.")
+            if recap.get("summary"):
+                st.markdown(recap["summary"])
+                st.markdown("---")
             if recap["takeaways"]:
                 for t in recap["takeaways"]:
                     st.markdown(f"- {t}")
-            else:
+            elif not recap.get("missing_granola"):
                 st.caption("Granola notes shared — open link for details")
-            st.markdown(f"[Open full Granola notes]({recap['granola']})")
+            if recap.get("granola"):
+                st.markdown(f"[Open full Granola notes]({recap['granola']})")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

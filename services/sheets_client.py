@@ -208,6 +208,12 @@ def fetch_alle_gtm_india(force_refresh: bool = False) -> pd.DataFrame:
     return fetch_sheet_tab(sheet_id, "2026 - GTM India", force_refresh)
 
 
+def fetch_headcount(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch headcount data from the HC sheet — tab '4-2026'."""
+    sheet_id = os.getenv("HC_SHEET_ID", "")
+    return fetch_sheet_tab(sheet_id, "4-2026", force_refresh)
+
+
 def fetch_ar_by_bu(force_refresh: bool = False) -> pd.DataFrame:
     """Fetch Group AR by BU — latest weekly tab from the AR sheet.
 

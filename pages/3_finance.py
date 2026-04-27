@@ -410,6 +410,193 @@ fig_bridge.update_layout(height=400, template="plotly_dark",
 st.plotly_chart(fig_bridge, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# HEADCOUNT & COST ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.markdown("---")
+st.markdown("### Headcount & Cost Analysis")
+st.caption("Source: HC Sheet — 4-2026 tab")
+
+@st.cache_data(ttl=3600)
+def load_headcount():
+    try:
+        from services.sheets_client import fetch_headcount
+        return fetch_headcount()
+    except Exception:
+        return pd.DataFrame()
+
+hc_raw = load_headcount()
+
+if hc_raw.empty:
+    st.info("No headcount data available. Add `HC_SHEET_ID` to secrets and share the sheet with the service account.")
+else:
+    # Column mapping based on sheet structure
+    col_map = {}
+    headers = [str(c).strip() for c in hc_raw.columns]
+    for i, h in enumerate(headers):
+        hl = h.lower()
+        if 'name of staff' in hl or h == 'Name of staff':
+            col_map['name'] = h
+        elif 'status' == hl:
+            col_map['status'] = h
+        elif 'division' == hl:
+            col_map['division'] = h
+        elif 'country' == hl:
+            col_map['country'] = h
+        elif 'location' == hl:
+            col_map['location'] = h
+        elif 'department' == hl:
+            col_map['department'] = h
+        elif 'title' == hl:
+            col_map['title'] = h
+        elif 'type' == hl:
+            col_map['type'] = h
+        elif 'usd monthly fixed pay' in hl:
+            col_map['monthly_usd'] = h
+        elif 'usd annual fixed pay' in hl:
+            col_map['annual_fixed_usd'] = h
+        elif 'usd annual variable pay' in hl:
+            col_map['annual_var_usd'] = h
+        elif 'total compensation (usd)' in hl:
+            col_map['total_comp_usd'] = h
+        elif h.strip() == 'BU' or h.strip() == 'BU ':
+            col_map['bu'] = h
+        elif 'bu mapping' in hl:
+            col_map['bu_mapping'] = h
+        elif 'bu head' in hl:
+            col_map['bu_head'] = h
+        elif 'gender' == hl:
+            col_map['gender'] = h
+        elif 'start date' in hl:
+            col_map['start_date'] = h
+
+    def safe_float(val):
+        s = str(val).replace(',', '').replace('"', '').replace('$', '').strip()
+        try:
+            return float(s)
+        except:
+            return 0.0
+
+    hc = hc_raw.copy()
+
+    # Parse USD compensation columns
+    for key in ['monthly_usd', 'annual_fixed_usd', 'annual_var_usd', 'total_comp_usd']:
+        if key in col_map:
+            hc[col_map[key]] = hc[col_map[key]].apply(safe_float)
+
+    # Filter active employees
+    if 'status' in col_map:
+        active = hc[hc[col_map['status']].str.strip().str.lower() == 'active'].copy()
+        exited = hc[hc[col_map['status']].str.strip().str.lower() == 'exit'].copy()
+    else:
+        active = hc.copy()
+        exited = pd.DataFrame()
+
+    total_active = len(active)
+    total_exited = len(exited)
+
+    # ── KPI Cards ────────────────────────────────────────────────────
+    monthly_burn = active[col_map['monthly_usd']].sum() if 'monthly_usd' in col_map else 0
+    annual_fixed = active[col_map['annual_fixed_usd']].sum() if 'annual_fixed_usd' in col_map else 0
+    annual_total = active[col_map['total_comp_usd']].sum() if 'total_comp_usd' in col_map else 0
+
+    hc1, hc2, hc3, hc4 = st.columns(4)
+    with hc1:
+        st.metric("Active Headcount", total_active)
+    with hc2:
+        st.metric("Monthly Payroll", format_money(monthly_burn))
+    with hc3:
+        st.metric("Annual Fixed Cost", format_money(annual_fixed))
+    with hc4:
+        st.metric("Exits (YTD+)", total_exited)
+
+    hc_tab_summary, hc_tab_bu = st.tabs(["📊 HC Summary", "💵 Cost by BU"])
+
+    # ── HC Summary Tab ──────────────────────────────────────────────
+    with hc_tab_summary:
+        hc_s1, hc_s2 = st.columns(2)
+
+        with hc_s1:
+            # By Department
+            if 'bu' in col_map:
+                st.markdown("#### Headcount by BU")
+                bu_hc = active.groupby(col_map['bu']).size().reset_index(name='Count')
+                bu_hc = bu_hc.sort_values('Count', ascending=False)
+                bu_hc = bu_hc[bu_hc[col_map['bu']].str.strip() != '']
+                fig_hc_bu = px.bar(bu_hc, x=col_map['bu'], y='Count',
+                                   color_discrete_sequence=["#4F46E5"],
+                                   text='Count')
+                fig_hc_bu.update_traces(textposition='outside')
+                fig_hc_bu.update_layout(height=350, template="plotly_dark",
+                                        xaxis_title="", yaxis_title="Employees",
+                                        margin=dict(l=20, r=20, t=20, b=20))
+                st.plotly_chart(fig_hc_bu, use_container_width=True)
+
+        with hc_s2:
+            # By Country
+            if 'country' in col_map:
+                st.markdown("#### Headcount by Country")
+                country_hc = active.groupby(col_map['country']).size().reset_index(name='Count')
+                country_hc = country_hc.sort_values('Count', ascending=False)
+                country_hc = country_hc[country_hc[col_map['country']].str.strip() != '']
+                fig_hc_country = px.pie(country_hc, names=col_map['country'], values='Count',
+                                        color_discrete_sequence=px.colors.qualitative.Set2,
+                                        hole=0.4)
+                fig_hc_country.update_layout(height=350, template="plotly_dark",
+                                              margin=dict(l=10, r=10, t=10, b=10))
+                st.plotly_chart(fig_hc_country, use_container_width=True)
+
+        # By BU Head
+        if 'bu_mapping' in col_map:
+            st.markdown("#### Headcount by BU Head")
+            head_hc = active.groupby(col_map['bu_mapping']).size().reset_index(name='Count')
+            head_hc = head_hc.sort_values('Count', ascending=False)
+            head_hc = head_hc[head_hc[col_map['bu_mapping']].str.strip() != '']
+            st.dataframe(head_hc, use_container_width=True, hide_index=True)
+
+    # ── Cost by BU Tab ──────────────────────────────────────────────
+    with hc_tab_bu:
+        if 'bu' in col_map and 'monthly_usd' in col_map:
+            st.markdown("#### Monthly Payroll Cost by BU")
+
+            bu_cost = active.groupby(col_map['bu']).agg(
+                Headcount=(col_map['name'] if 'name' in col_map else col_map['bu'], 'count'),
+                Monthly_USD=(col_map['monthly_usd'], 'sum'),
+                Annual_Fixed_USD=(col_map['annual_fixed_usd'], 'sum') if 'annual_fixed_usd' in col_map else (col_map['monthly_usd'], lambda x: x.sum() * 12),
+            ).reset_index()
+            bu_cost = bu_cost[bu_cost[col_map['bu']].str.strip() != '']
+            bu_cost = bu_cost.sort_values('Monthly_USD', ascending=False)
+            bu_cost['Avg Monthly/Head'] = bu_cost['Monthly_USD'] / bu_cost['Headcount']
+
+            # Chart
+            fig_cost = go.Figure()
+            fig_cost.add_trace(go.Bar(
+                x=bu_cost[col_map['bu']], y=bu_cost['Monthly_USD'],
+                name="Monthly Payroll",
+                marker_color="#7C3AED",
+                text=[format_money(v) for v in bu_cost['Monthly_USD']],
+                textposition='outside',
+            ))
+            fig_cost.update_layout(height=400, template="plotly_dark",
+                                    yaxis_title="Monthly Cost (USD)",
+                                    margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig_cost, use_container_width=True)
+
+            # Table
+            bu_display = bu_cost.copy()
+            bu_display.columns = [col_map['bu'], 'HC', 'Monthly Cost', 'Annual Fixed', 'Avg/Head']
+            bu_display['Monthly Cost'] = bu_display['Monthly Cost'].apply(format_money)
+            bu_display['Annual Fixed'] = bu_display['Annual Fixed'].apply(format_money)
+            bu_display['Avg/Head'] = bu_display['Avg/Head'].apply(format_money)
+            st.dataframe(bu_display, use_container_width=True, hide_index=True)
+
+            # Total row
+            st.caption(f"**Total:** {total_active} employees | Monthly: {format_money(monthly_burn)} | Annual Fixed: {format_money(annual_fixed)}")
+        else:
+            st.info("BU or compensation columns not found in headcount data.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GROUP AR BY BU
 # ══════════════════════════════════════════════════════════════════════════════
 

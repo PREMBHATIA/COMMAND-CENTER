@@ -441,9 +441,13 @@ if hc_raw.empty:
     else:
         st.info("No headcount data available. Set `HC_SHEET_ID` in secrets to the Drive file ID of the HC Master .xlsx, and share the file with the service account.")
 else:
+    # Some HC headers have trailing spaces (e.g. "BU "). Strip them so col_map
+    # lookups (built from stripped headers below) match real DataFrame columns.
+    hc_raw = hc_raw.rename(columns=lambda c: str(c).strip())
+
     # Column mapping based on sheet structure
     col_map = {}
-    headers = [str(c).strip() for c in hc_raw.columns]
+    headers = list(hc_raw.columns)
     for i, h in enumerate(headers):
         hl = h.lower()
         if 'name of staff' in hl or h == 'Name of staff':

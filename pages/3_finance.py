@@ -136,13 +136,15 @@ if not raw_pnl.empty:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-if raw_pnl.empty or not pnl:
-    st.warning("No P&L data found. Download the 'Summary' tab from the Graas FY 2026 Actuals sheet.")
-    st.markdown("[Open Source Sheet →](https://docs.google.com/spreadsheets/d/1njRsoDj5QVh__Nq1cHZ8lYMMEJA28_oj/edit?gid=1924957656)")
-    st.stop()
+_has_pnl = not raw_pnl.empty and bool(pnl)
 
-st.markdown("### Graas P&L — FY 2026 Actuals vs AOP")
-st.caption("Source of truth from Finance | Updated monthly")
+if not _has_pnl:
+    st.info("No P&L data — upload the Excel above to see P&L, or scroll down for Headcount & AR.")
+
+# ── P&L Section (only if data available) ─────────────────────────────
+if _has_pnl:
+    st.markdown("### Graas P&L — FY 2026 Actuals vs AOP")
+    st.caption("Source of truth from Finance | Updated monthly")
 
 # ── Determine latest month with data ─────────────────────────────────
 latest_month_idx = -1
@@ -176,238 +178,240 @@ gp_var = gp_ytd - gp_aop_ytd
 rev_var = rev_ytd - rev_aop_ytd
 ebitda_var = ebitda_ytd - ebitda_aop_ytd
 
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric("Gross Profit (YTD)", format_money(gp_ytd),
-               f"{'+' if gp_var >= 0 else ''}{format_money(gp_var)} vs AOP")
-with c2:
-    st.metric("Net Revenue (YTD)", format_money(rev_ytd),
-               f"{'+' if rev_var >= 0 else ''}{format_money(rev_var)} vs AOP")
-with c3:
-    st.metric("EBITDA (YTD)", format_money(ebitda_ytd),
-               f"{'+' if ebitda_var >= 0 else ''}{format_money(ebitda_var)} vs AOP")
-with c4:
-    gp_pct = (gp_ytd / rev_ytd * 100) if rev_ytd else 0
-    st.metric("GP Margin", f"{gp_pct:.0f}%",
-               f"OpEx: {format_money(opex_ytd)}")
+if _has_pnl:
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Gross Profit (YTD)", format_money(gp_ytd),
+                   f"{'+' if gp_var >= 0 else ''}{format_money(gp_var)} vs AOP")
+    with c2:
+        st.metric("Net Revenue (YTD)", format_money(rev_ytd),
+                   f"{'+' if rev_var >= 0 else ''}{format_money(rev_var)} vs AOP")
+    with c3:
+        st.metric("EBITDA (YTD)", format_money(ebitda_ytd),
+                   f"{'+' if ebitda_var >= 0 else ''}{format_money(ebitda_var)} vs AOP")
+    with c4:
+        gp_pct = (gp_ytd / rev_ytd * 100) if rev_ytd else 0
+        st.metric("GP Margin", f"{gp_pct:.0f}%",
+                   f"OpEx: {format_money(opex_ytd)}")
 
-# ── Monthly P&L Table ────────────────────────────────────────────────
-st.markdown("### Monthly P&L — Actuals vs AOP")
+if _has_pnl:
+    # ── Monthly P&L Table ────────────────────────────────────────────────
+    st.markdown("### Monthly P&L — Actuals vs AOP")
 
-metrics_for_table = [
-    ("GMV", "Total", "GMV"),
-    ("Gross Rev", "Total", "Gross Revenue"),
-    ("Net Rev", "Total", "Net Revenue"),
-    ("CoS", "Total", "Cost of Sales"),
-    ("GP", "Total", "**Gross Profit**"),
-    ("OpEx", "Total", "Operating Expenses"),
-    ("EBITDA", "Total", "**EBITDA**"),
-]
+    metrics_for_table = [
+        ("GMV", "Total", "GMV"),
+        ("Gross Rev", "Total", "Gross Revenue"),
+        ("Net Rev", "Total", "Net Revenue"),
+        ("CoS", "Total", "Cost of Sales"),
+        ("GP", "Total", "**Gross Profit**"),
+        ("OpEx", "Total", "Operating Expenses"),
+        ("EBITDA", "Total", "**EBITDA**"),
+    ]
 
-table_rows = []
-for metric, bu, label in metrics_for_table:
-    row = {"Metric": label}
-    for m in ytd_months:
-        actual = get_val(metric, bu, "actual", m)
-        aop = get_val(metric, bu, "aop", m)
-        var_pct = ((actual - aop) / abs(aop) * 100) if aop != 0 else 0
-        row[f"{m} Actual"] = format_money_short(actual)
-        row[f"{m} AOP"] = format_money_short(aop)
-        row[f"{m} Var%"] = f"{var_pct:+.0f}%"
-    # YTD
-    ytd_actual = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
-    ytd_aop = sum(get_val(metric, bu, "aop", m) for m in ytd_months)
-    ytd_var_pct = ((ytd_actual - ytd_aop) / abs(ytd_aop) * 100) if ytd_aop != 0 else 0
-    row["YTD Actual"] = format_money_short(ytd_actual)
-    row["YTD AOP"] = format_money_short(ytd_aop)
-    row["YTD Var%"] = f"{ytd_var_pct:+.0f}%"
-    table_rows.append(row)
-
-pnl_table = pd.DataFrame(table_rows)
-
-def var_color(val):
-    try:
-        v = float(str(val).replace('%', '').replace('+', ''))
-        if v > 5:
-            return "color: #10B981"
-        elif v < -5:
-            return "color: #EF4444"
-        return ""
-    except:
-        return ""
-
-def var_color_dollar(val):
-    """Color dollar variance values: positive=green, negative=red."""
-    try:
-        s = str(val).replace('$', '').replace(',', '').replace('K', '').replace('M', '')
-        v = float(s)
-        if v > 0:
-            return "color: #10B981"
-        elif v < 0:
-            return "color: #EF4444"
-        return ""
-    except:
-        return ""
-
-def ytd_bg(val):
-    return "background-color: #1E293B"
-
-var_cols = [c for c in pnl_table.columns if "Var%" in c]
-ytd_cols = [c for c in pnl_table.columns if c.startswith("YTD")]
-styled_pnl = (pnl_table.style
-    .map(var_color, subset=var_cols)
-    .map(ytd_bg, subset=ytd_cols)
-)
-st.dataframe(styled_pnl, use_container_width=True, hide_index=True)
-
-# ── GP by BU — Actuals vs AOP ────────────────────────────────────────
-st.markdown("### Gross Profit by Business Unit")
-
-bus = ["ABU", "Marketplace", "EBU", "Platform"]
-
-col_chart, col_table = st.columns([3, 2])
-
-with col_chart:
-    bu_gp_data = []
-    for bu in bus:
-        actual = sum(get_val("GP", bu, "actual", m) for m in ytd_months)
-        aop = sum(get_val("GP", bu, "aop", m) for m in ytd_months)
-        bu_gp_data.append({"BU": bu, "Actual": actual, "AOP": aop})
-
-    bu_gp_df = pd.DataFrame(bu_gp_data)
-
-    fig_bu = go.Figure()
-    fig_bu.add_trace(go.Bar(x=bus, y=bu_gp_df["AOP"], name="AOP", marker_color="#374151"))
-    fig_bu.add_trace(go.Bar(x=bus, y=bu_gp_df["Actual"], name="Actual",
-                             marker_color=["#10B981" if a >= p else "#EF4444"
-                                            for a, p in zip(bu_gp_df["Actual"], bu_gp_df["AOP"])]))
-    fig_bu.update_layout(barmode="group", height=350, template="plotly_dark",
-                          yaxis_title="Gross Profit ($)", margin=dict(l=20, r=20, t=20, b=20))
-    st.plotly_chart(fig_bu, use_container_width=True)
-
-with col_table:
-    bu_detail_rows = []
-    for bu in bus:
-        actual = sum(get_val("GP", bu, "actual", m) for m in ytd_months)
-        aop = sum(get_val("GP", bu, "aop", m) for m in ytd_months)
-        var = actual - aop
-        var_pct = (var / abs(aop) * 100) if aop != 0 else 0
-        # GP margin for BU
-        rev_actual = sum(get_val("Net Rev", bu, "actual", m) for m in ytd_months)
-        gp_margin = (actual / rev_actual * 100) if rev_actual != 0 else 0
-        bu_detail_rows.append({
-            "BU": bu,
-            "GP Actual": format_money(actual),
-            "GP AOP": format_money(aop),
-            "Variance": format_money(var),
-            "Var %": f"{var_pct:+.0f}%",
-            "GP Margin": f"{gp_margin:.0f}%",
-        })
-    st.dataframe(pd.DataFrame(bu_detail_rows), use_container_width=True, hide_index=True)
-
-# ── Monthly GP Trend — Actual vs AOP ─────────────────────────────────
-st.markdown("### Monthly GP Trend — Actual vs AOP")
-
-fig_gp_trend = go.Figure()
-actual_vals = [get_val("GP", "Total", "actual", m) for m in MONTHS]
-aop_vals = [get_val("GP", "Total", "aop", m) for m in MONTHS]
-
-# Only show months with data
-active_months = [m for m, v in zip(MONTHS, actual_vals) if v != 0]
-active_actuals = [v for v in actual_vals if v != 0]
-active_aop = [aop_vals[i] for i, v in enumerate(actual_vals) if v != 0]
-
-fig_gp_trend.add_trace(go.Bar(x=active_months, y=active_aop, name="AOP", marker_color="#374151"))
-fig_gp_trend.add_trace(go.Bar(x=active_months, y=active_actuals, name="Actual",
-                               marker_color=["#10B981" if a >= p else "#EF4444"
-                                              for a, p in zip(active_actuals, active_aop)]))
-fig_gp_trend.update_layout(barmode="group", height=350, template="plotly_dark",
-                            yaxis_title="Gross Profit ($)", margin=dict(l=20, r=20, t=20, b=20))
-st.plotly_chart(fig_gp_trend, use_container_width=True)
-
-# ── Operating Expenses Breakdown ─────────────────────────────────────
-st.markdown("### Operating Expenses Breakdown")
-
-opex_categories = [
-    ("HC Fixed", "S&M", "S&M"),
-    ("HC Fixed", "Delivery", "Delivery"),
-    ("HC Fixed", "Tech", "Tech"),
-    ("HC Fixed", "G&A", "G&A"),
-    ("HC Variable", "Total", "Variable HC"),
-    ("Other Exp", "Total", "Other Expenses"),
-]
-
-opex_col1, opex_col2 = st.columns([3, 2])
-
-with opex_col1:
-    opex_data = []
-    for metric, bu, label in opex_categories:
-        actual = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
-        if actual > 0:
-            opex_data.append({"Category": label, "Amount": actual})
-
-    if opex_data:
-        opex_df = pd.DataFrame(opex_data).sort_values("Amount", ascending=True)
-        fig_opex = px.bar(opex_df, x="Amount", y="Category", orientation="h",
-                           text="Amount", color_discrete_sequence=["#7C3AED"])
-        fig_opex.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
-        fig_opex.update_layout(height=300, template="plotly_dark",
-                                margin=dict(l=20, r=80, t=20, b=20))
-        st.plotly_chart(fig_opex, use_container_width=True)
-
-with opex_col2:
-    opex_table = []
-    for metric, bu, label in opex_categories:
-        row = {"Category": label}
+    table_rows = []
+    for metric, bu, label in metrics_for_table:
+        row = {"Metric": label}
         for m in ytd_months:
-            row[m] = format_money_short(get_val(metric, bu, "actual", m))
-        ytd_act = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
-        ytd_aop_val = sum(get_val(metric, bu, "aop", m) for m in ytd_months)
-        row["YTD"] = format_money_short(ytd_act)
-        row["AOP"] = format_money_short(ytd_aop_val)
-        var = ytd_act - ytd_aop_val
-        row["Var"] = format_money_short(var)
-        opex_table.append(row)
-    # Total row
-    total_row = {"Category": "**Total OpEx**"}
-    for m in ytd_months:
-        total_row[m] = format_money_short(get_val("OpEx", "Total", "actual", m))
-    total_row["YTD"] = format_money_short(opex_ytd)
-    total_row["AOP"] = format_money_short(opex_aop_ytd)
-    total_row["Var"] = format_money_short(opex_ytd - opex_aop_ytd)
-    opex_table.append(total_row)
+            actual = get_val(metric, bu, "actual", m)
+            aop = get_val(metric, bu, "aop", m)
+            var_pct = ((actual - aop) / abs(aop) * 100) if aop != 0 else 0
+            row[f"{m} Actual"] = format_money_short(actual)
+            row[f"{m} AOP"] = format_money_short(aop)
+            row[f"{m} Var%"] = f"{var_pct:+.0f}%"
+        # YTD
+        ytd_actual = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
+        ytd_aop = sum(get_val(metric, bu, "aop", m) for m in ytd_months)
+        ytd_var_pct = ((ytd_actual - ytd_aop) / abs(ytd_aop) * 100) if ytd_aop != 0 else 0
+        row["YTD Actual"] = format_money_short(ytd_actual)
+        row["YTD AOP"] = format_money_short(ytd_aop)
+        row["YTD Var%"] = f"{ytd_var_pct:+.0f}%"
+        table_rows.append(row)
 
-    opex_df = pd.DataFrame(opex_table)
-    ytd_opex_cols = [c for c in opex_df.columns if c in ["YTD", "AOP", "Var"]]
-    styled_opex = (opex_df.style
-        .map(ytd_bg, subset=ytd_opex_cols)
-        .map(var_color_dollar, subset=["Var"])
+    pnl_table = pd.DataFrame(table_rows)
+
+    def var_color(val):
+        try:
+            v = float(str(val).replace('%', '').replace('+', ''))
+            if v > 5:
+                return "color: #10B981"
+            elif v < -5:
+                return "color: #EF4444"
+            return ""
+        except:
+            return ""
+
+    def var_color_dollar(val):
+        """Color dollar variance values: positive=green, negative=red."""
+        try:
+            s = str(val).replace('$', '').replace(',', '').replace('K', '').replace('M', '')
+            v = float(s)
+            if v > 0:
+                return "color: #10B981"
+            elif v < 0:
+                return "color: #EF4444"
+            return ""
+        except:
+            return ""
+
+    def ytd_bg(val):
+        return "background-color: #1E293B"
+
+    var_cols = [c for c in pnl_table.columns if "Var%" in c]
+    ytd_cols = [c for c in pnl_table.columns if c.startswith("YTD")]
+    styled_pnl = (pnl_table.style
+        .map(var_color, subset=var_cols)
+        .map(ytd_bg, subset=ytd_cols)
     )
-    st.dataframe(styled_opex, use_container_width=True, hide_index=True)
+    st.dataframe(styled_pnl, use_container_width=True, hide_index=True)
 
-# ── EBITDA Bridge ────────────────────────────────────────────────────
-st.markdown("### EBITDA Bridge (YTD)")
+    # ── GP by BU — Actuals vs AOP ────────────────────────────────────────
+    st.markdown("### Gross Profit by Business Unit")
 
-fig_bridge = go.Figure(go.Waterfall(
-    orientation="v",
-    x=["Net Revenue", "Cost of Sales", "Gross Profit", "OpEx", "EBITDA"],
-    y=[rev_ytd, -sum(get_val("CoS", "Total", "actual", m) for m in ytd_months),
-       0, -opex_ytd, 0],
-    measure=["absolute", "relative", "total", "relative", "total"],
-    connector=dict(line=dict(color="#374151")),
-    increasing=dict(marker=dict(color="#10B981")),
-    decreasing=dict(marker=dict(color="#EF4444")),
-    totals=dict(marker=dict(color="#4F46E5")),
-    text=[format_money(rev_ytd),
-          format_money(sum(get_val("CoS", "Total", "actual", m) for m in ytd_months)),
-          format_money(gp_ytd),
-          format_money(opex_ytd),
-          format_money(ebitda_ytd)],
-    textposition="outside",
-))
-fig_bridge.update_layout(height=400, template="plotly_dark",
-                          margin=dict(l=20, r=20, t=20, b=20))
-st.plotly_chart(fig_bridge, use_container_width=True)
+    bus = ["ABU", "Marketplace", "EBU", "Platform"]
+
+    col_chart, col_table = st.columns([3, 2])
+
+    with col_chart:
+        bu_gp_data = []
+        for bu in bus:
+            actual = sum(get_val("GP", bu, "actual", m) for m in ytd_months)
+            aop = sum(get_val("GP", bu, "aop", m) for m in ytd_months)
+            bu_gp_data.append({"BU": bu, "Actual": actual, "AOP": aop})
+
+        bu_gp_df = pd.DataFrame(bu_gp_data)
+
+        fig_bu = go.Figure()
+        fig_bu.add_trace(go.Bar(x=bus, y=bu_gp_df["AOP"], name="AOP", marker_color="#374151"))
+        fig_bu.add_trace(go.Bar(x=bus, y=bu_gp_df["Actual"], name="Actual",
+                                 marker_color=["#10B981" if a >= p else "#EF4444"
+                                                for a, p in zip(bu_gp_df["Actual"], bu_gp_df["AOP"])]))
+        fig_bu.update_layout(barmode="group", height=350, template="plotly_dark",
+                              yaxis_title="Gross Profit ($)", margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig_bu, use_container_width=True)
+
+    with col_table:
+        bu_detail_rows = []
+        for bu in bus:
+            actual = sum(get_val("GP", bu, "actual", m) for m in ytd_months)
+            aop = sum(get_val("GP", bu, "aop", m) for m in ytd_months)
+            var = actual - aop
+            var_pct = (var / abs(aop) * 100) if aop != 0 else 0
+            # GP margin for BU
+            rev_actual = sum(get_val("Net Rev", bu, "actual", m) for m in ytd_months)
+            gp_margin = (actual / rev_actual * 100) if rev_actual != 0 else 0
+            bu_detail_rows.append({
+                "BU": bu,
+                "GP Actual": format_money(actual),
+                "GP AOP": format_money(aop),
+                "Variance": format_money(var),
+                "Var %": f"{var_pct:+.0f}%",
+                "GP Margin": f"{gp_margin:.0f}%",
+            })
+        st.dataframe(pd.DataFrame(bu_detail_rows), use_container_width=True, hide_index=True)
+
+    # ── Monthly GP Trend — Actual vs AOP ─────────────────────────────────
+    st.markdown("### Monthly GP Trend — Actual vs AOP")
+
+    fig_gp_trend = go.Figure()
+    actual_vals = [get_val("GP", "Total", "actual", m) for m in MONTHS]
+    aop_vals = [get_val("GP", "Total", "aop", m) for m in MONTHS]
+
+    # Only show months with data
+    active_months = [m for m, v in zip(MONTHS, actual_vals) if v != 0]
+    active_actuals = [v for v in actual_vals if v != 0]
+    active_aop = [aop_vals[i] for i, v in enumerate(actual_vals) if v != 0]
+
+    fig_gp_trend.add_trace(go.Bar(x=active_months, y=active_aop, name="AOP", marker_color="#374151"))
+    fig_gp_trend.add_trace(go.Bar(x=active_months, y=active_actuals, name="Actual",
+                                   marker_color=["#10B981" if a >= p else "#EF4444"
+                                                  for a, p in zip(active_actuals, active_aop)]))
+    fig_gp_trend.update_layout(barmode="group", height=350, template="plotly_dark",
+                                yaxis_title="Gross Profit ($)", margin=dict(l=20, r=20, t=20, b=20))
+    st.plotly_chart(fig_gp_trend, use_container_width=True)
+
+    # ── Operating Expenses Breakdown ─────────────────────────────────────
+    st.markdown("### Operating Expenses Breakdown")
+
+    opex_categories = [
+        ("HC Fixed", "S&M", "S&M"),
+        ("HC Fixed", "Delivery", "Delivery"),
+        ("HC Fixed", "Tech", "Tech"),
+        ("HC Fixed", "G&A", "G&A"),
+        ("HC Variable", "Total", "Variable HC"),
+        ("Other Exp", "Total", "Other Expenses"),
+    ]
+
+    opex_col1, opex_col2 = st.columns([3, 2])
+
+    with opex_col1:
+        opex_data = []
+        for metric, bu, label in opex_categories:
+            actual = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
+            if actual > 0:
+                opex_data.append({"Category": label, "Amount": actual})
+
+        if opex_data:
+            opex_df = pd.DataFrame(opex_data).sort_values("Amount", ascending=True)
+            fig_opex = px.bar(opex_df, x="Amount", y="Category", orientation="h",
+                               text="Amount", color_discrete_sequence=["#7C3AED"])
+            fig_opex.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+            fig_opex.update_layout(height=300, template="plotly_dark",
+                                    margin=dict(l=20, r=80, t=20, b=20))
+            st.plotly_chart(fig_opex, use_container_width=True)
+
+    with opex_col2:
+        opex_table = []
+        for metric, bu, label in opex_categories:
+            row = {"Category": label}
+            for m in ytd_months:
+                row[m] = format_money_short(get_val(metric, bu, "actual", m))
+            ytd_act = sum(get_val(metric, bu, "actual", m) for m in ytd_months)
+            ytd_aop_val = sum(get_val(metric, bu, "aop", m) for m in ytd_months)
+            row["YTD"] = format_money_short(ytd_act)
+            row["AOP"] = format_money_short(ytd_aop_val)
+            var = ytd_act - ytd_aop_val
+            row["Var"] = format_money_short(var)
+            opex_table.append(row)
+        # Total row
+        total_row = {"Category": "**Total OpEx**"}
+        for m in ytd_months:
+            total_row[m] = format_money_short(get_val("OpEx", "Total", "actual", m))
+        total_row["YTD"] = format_money_short(opex_ytd)
+        total_row["AOP"] = format_money_short(opex_aop_ytd)
+        total_row["Var"] = format_money_short(opex_ytd - opex_aop_ytd)
+        opex_table.append(total_row)
+
+        opex_df = pd.DataFrame(opex_table)
+        ytd_opex_cols = [c for c in opex_df.columns if c in ["YTD", "AOP", "Var"]]
+        styled_opex = (opex_df.style
+            .map(ytd_bg, subset=ytd_opex_cols)
+            .map(var_color_dollar, subset=["Var"])
+        )
+        st.dataframe(styled_opex, use_container_width=True, hide_index=True)
+
+    # ── EBITDA Bridge ────────────────────────────────────────────────────
+    st.markdown("### EBITDA Bridge (YTD)")
+
+    fig_bridge = go.Figure(go.Waterfall(
+        orientation="v",
+        x=["Net Revenue", "Cost of Sales", "Gross Profit", "OpEx", "EBITDA"],
+        y=[rev_ytd, -sum(get_val("CoS", "Total", "actual", m) for m in ytd_months),
+           0, -opex_ytd, 0],
+        measure=["absolute", "relative", "total", "relative", "total"],
+        connector=dict(line=dict(color="#374151")),
+        increasing=dict(marker=dict(color="#10B981")),
+        decreasing=dict(marker=dict(color="#EF4444")),
+        totals=dict(marker=dict(color="#4F46E5")),
+        text=[format_money(rev_ytd),
+              format_money(sum(get_val("CoS", "Total", "actual", m) for m in ytd_months)),
+              format_money(gp_ytd),
+              format_money(opex_ytd),
+              format_money(ebitda_ytd)],
+        textposition="outside",
+    ))
+    fig_bridge.update_layout(height=400, template="plotly_dark",
+                              margin=dict(l=20, r=20, t=20, b=20))
+    st.plotly_chart(fig_bridge, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADCOUNT & COST ANALYSIS

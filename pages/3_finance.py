@@ -423,20 +423,23 @@ if _has_pnl:
 
 st.markdown("---")
 st.markdown("### Headcount & Cost Analysis")
-st.caption("Source: HC Sheet — 4-2026 tab")
+st.caption("Source: HC Master (Drive) — latest monthly tab")
 
 @st.cache_data(ttl=3600)
 def load_headcount():
     try:
         from services.sheets_client import fetch_headcount
-        return fetch_headcount()
-    except Exception:
-        return pd.DataFrame()
+        return fetch_headcount(), None
+    except Exception as e:
+        return pd.DataFrame(), f"{type(e).__name__}: {e}"
 
-hc_raw = load_headcount()
+hc_raw, hc_err = load_headcount()
 
 if hc_raw.empty:
-    st.info("No headcount data available. Add `HC_SHEET_ID` to secrets and share the sheet with the service account.")
+    if hc_err:
+        st.error(f"Headcount load failed — {hc_err}")
+    else:
+        st.info("No headcount data available. Set `HC_SHEET_ID` in secrets to the Drive file ID of the HC Master .xlsx, and share the file with the service account.")
 else:
     # Column mapping based on sheet structure
     col_map = {}

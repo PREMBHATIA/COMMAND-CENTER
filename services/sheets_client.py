@@ -208,10 +208,112 @@ def fetch_alle_gtm_india(force_refresh: bool = False) -> pd.DataFrame:
     return fetch_sheet_tab(sheet_id, "2026 - GTM India", force_refresh)
 
 
+def _get_service_account_creds() -> Optional[Credentials]:
+    """Return service account Credentials (or None) using the same lookup as _get_client."""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+            return Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]), scopes=SCOPES
+            )
+    except Exception:
+        pass
+    creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials/service_account.json")
+    full_path = Path(__file__).parent.parent / creds_path
+    if not full_path.exists():
+        return None
+    return Credentials.from_service_account_file(str(full_path), scopes=SCOPES)
+
+
+def fetch_drive_xlsx_tab(file_id: str, tab_name: str, force_refresh: bool = False) -> pd.DataFrame:
+    """Download an .xlsx file from Drive and read a single tab into a DataFrame.
+
+    Use this when the source is an uploaded Excel file in Drive (mimeType
+    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) rather
+    than a native Google Sheet — gspread cannot open .xlsx files.
+    """
+    from io import BytesIO
+    cache_key = f"drive_xlsx_{tab_name}"
+
+    if not force_refresh:
+        cached = _read_cache(file_id, cache_key)
+        if cached is not None:
+            return cached
+
+    creds = _get_service_account_creds()
+    if creds is None:
+        cached = _read_cache(file_id, cache_key, max_age_hours=99999)
+        return cached if cached is not None else pd.DataFrame()
+
+    import google.auth.transport.requests as greq
+    session = greq.AuthorizedSession(creds)
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    resp = session.get(url)
+    resp.raise_for_status()
+
+    df = pd.read_excel(BytesIO(resp.content), sheet_name=tab_name, dtype=str).fillna("")
+
+    try:
+        _write_cache(file_id, cache_key, df)
+    except Exception:
+        pass
+    return df
+
+
 def fetch_headcount(force_refresh: bool = False) -> pd.DataFrame:
-    """Fetch headcount data from the HC sheet — tab '4-2026'."""
-    sheet_id = os.getenv("HC_SHEET_ID", "")
-    return fetch_sheet_tab(sheet_id, "4-2026", force_refresh)
+    """Fetch headcount data from the HC master Excel file in Drive.
+
+    Auto-picks the latest tab named like 'M-YYYY' (e.g. '4-2026', '12-2025'),
+    so this rolls forward each month without code changes.
+    """
+    from io import BytesIO
+    import re
+
+    file_id = os.getenv("HC_SHEET_ID", "")
+    if not file_id:
+        return pd.DataFrame()
+
+    cache_key = "drive_xlsx_latest_m_yyyy"
+    if not force_refresh:
+        cached = _read_cache(file_id, cache_key)
+        if cached is not None:
+            return cached
+
+    creds = _get_service_account_creds()
+    if creds is None:
+        cached = _read_cache(file_id, cache_key, max_age_hours=99999)
+        return cached if cached is not None else pd.DataFrame()
+
+    import google.auth.transport.requests as greq
+    session = greq.AuthorizedSession(creds)
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    resp = session.get(url)
+    resp.raise_for_status()
+
+    xls = pd.ExcelFile(BytesIO(resp.content))
+    pattern = re.compile(r"^\s*(\d{1,2})-(\d{4})\s*$")
+    dated = []
+    for name in xls.sheet_names:
+        m = pattern.match(str(name))
+        if m:
+            month, year = int(m.group(1)), int(m.group(2))
+            if 1 <= month <= 12:
+                dated.append(((year, month), name))
+
+    if not dated:
+        raise ValueError(
+            f"No M-YYYY tabs found in HC file. Tabs present: {xls.sheet_names}"
+        )
+
+    dated.sort(reverse=True)
+    latest_tab = dated[0][1]
+    df = pd.read_excel(xls, sheet_name=latest_tab, dtype=str).fillna("")
+
+    try:
+        _write_cache(file_id, cache_key, df)
+    except Exception:
+        pass
+    return df
 
 
 def fetch_ar_by_bu(force_refresh: bool = False) -> pd.DataFrame:

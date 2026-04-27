@@ -1,5 +1,6 @@
 """Ask Graas — AI Chat Interface for the Command Center."""
 
+import re as _re
 import streamlit as st
 import pandas as pd
 import json
@@ -15,6 +16,21 @@ _env_path = str(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv(_env_path, override=True)
 
 st.set_page_config(page_title="Ask Graas | Command Center", page_icon="💬", layout="wide")
+
+st.markdown("""<style>
+.citation { color: #1e40af; font-size: 0.85em; font-style: italic; }
+</style>""", unsafe_allow_html=True)
+
+
+def _style_citations(text: str) -> str:
+    """Replace *(citation text)* with dark blue styled HTML spans."""
+    return _re.sub(
+        r'\*\(([^)]+)\)\*',
+        r'<span class="citation">(\1)</span>',
+        text,
+    )
+
+
 st.markdown("## 💬 Ask Graas")
 st.caption("Ask anything about your business — Finance, AR, Pipeline, Product Usage, Health Scores")
 
@@ -357,7 +373,10 @@ if "chat_messages" not in st.session_state:
 # Display chat history
 for msg in st.session_state.chat_messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        if msg["role"] == "assistant":
+            st.markdown(_style_citations(msg["content"]), unsafe_allow_html=True)
+        else:
+            st.markdown(msg["content"])
 
 # Chat input
 user_input = st.chat_input("Ask anything about your business...")
@@ -396,7 +415,7 @@ if user_input:
                 )
 
                 assistant_msg = response.content[0].text
-                st.markdown(assistant_msg)
+                st.markdown(_style_citations(assistant_msg), unsafe_allow_html=True)
 
                 st.session_state.chat_messages.append(
                     {"role": "assistant", "content": assistant_msg}

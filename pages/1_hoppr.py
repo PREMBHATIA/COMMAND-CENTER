@@ -170,16 +170,27 @@ with tab_funnel:
             key="hoppr_period",
         )
         today_ts = daily["date"].max()
+        data_start = daily["date"].min()
         cutoffs = {"1W": today_ts - pd.Timedelta(days=7),
                    "1M": today_ts - pd.Timedelta(days=30),
                    "3M": today_ts - pd.Timedelta(days=90)}
         if period in cutoffs:
-            cutoff = cutoffs[period]
+            cutoff = max(cutoffs[period], data_start)  # don't go before data start
             daily_f = daily[daily["date"] >= cutoff]
             country_f = country[country["date"] >= cutoff] if not country.empty and "date" in country.columns else country
         else:
             daily_f = daily
             country_f = country
+
+        # Show what the filter is actually covering
+        f_start = daily_f["date"].min().strftime("%-d %b %Y") if not daily_f.empty else "—"
+        f_end   = daily_f["date"].max().strftime("%-d %b %Y") if not daily_f.empty else "—"
+        data_days = (daily["date"].max() - daily["date"].min()).days + 1
+        if period in cutoffs and cutoffs[period] < data_start:
+            st.caption(f"📅 {f_start} → {f_end} · {len(daily_f)} days  "
+                       f"_(data only goes back {data_days} days — {period} view shows the same as All)_")
+        else:
+            st.caption(f"📅 {f_start} → {f_end} · {len(daily_f)} days")
 
         # Main trend chart
         fig_trend = go.Figure()

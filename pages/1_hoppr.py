@@ -734,6 +734,52 @@ Current data snapshot:
 {ctx}
 ---"""
 
+    # ── Seller-specific query context (injected dynamically) ──────────────────
+    def _get_seller_detail_context(seller_id: str, eval_df: pd.DataFrame) -> str:
+        """Return the full query log for a specific seller, broken down by user email."""
+        if eval_df.empty or "_seller" not in eval_df.columns:
+            return ""
+        rows = eval_df[eval_df["_seller"] == seller_id].sort_values("_date")
+        if rows.empty:
+            return ""
+
+        lines = [f"\n===== FULL QUERY LOG FOR SELLER: {seller_id} ====="]
+        lines.append(f"Total queries in dataset: {len(rows)}")
+
+        # Per-email breakdown
+        if "_email" in rows.columns:
+            email_groups = rows.groupby("_email", sort=False)
+            for email, grp in email_groups:
+                em = str(email)
+                if not em or em == "nan":
+                    continue
+                grp = grp.sort_values("_date")
+                lines.append(f"\n  --- User: {em} ({len(grp)} queries) ---")
+                for _, r in grp.iterrows():
+                    dt = str(r["_date"])[:10]
+                    q  = str(r["_question"])[:400]
+                    bucket_tags = ", ".join(classify_question(q))
+                    acc_flag = " [DATA ACCURACY ISSUE]" if is_accuracy(q) else ""
+                    lines.append(f"    [{dt}] [{bucket_tags}]{acc_flag} {q}")
+        else:
+            for _, r in rows.iterrows():
+                dt = str(r["_date"])[:10]
+                q  = str(r["_question"])[:400]
+                lines.append(f"  [{dt}] {q}")
+
+        lines.append("===== END SELLER LOG =====")
+        return "\n".join(lines)
+
+    def _detect_seller_ids(text: str, known_sellers: list) -> list:
+        """Find any known seller IDs mentioned in the user's question."""
+        text_upper = text.upper()
+        found = []
+        for s in known_sellers:
+            sid = s.get("seller_id", "")
+            if sid and len(sid) >= 3 and sid in text_upper:
+                found.append(sid)
+        return list(set(found))
+
     if "hoppr_chat" not in st.session_state:
         st.session_state.hoppr_chat = []
 
@@ -757,12 +803,23 @@ Current data snapshot:
                 if not api_key:
                     response = "⚠️ ANTHROPIC_API_KEY not configured."
                 else:
+                    # Detect if question is about a specific seller → inject full query log
+                    mentioned_sellers = _detect_seller_ids(prompt, sellers)
+                    extra_ctx = ""
+                    if mentioned_sellers and not eval_processed.empty:
+                        for sid in mentioned_sellers[:3]:  # cap at 3 sellers
+                            extra_ctx += _get_seller_detail_context(sid, eval_processed)
+
+                    dynamic_system = SYSTEM_PROMPT
+                    if extra_ctx:
+                        dynamic_system += f"\n\nFULL QUERY DATA FOR MENTIONED SELLERS (use this to answer the question):\n{extra_ctx}"
+
                     ai = _anthropic.Anthropic(api_key=api_key)
                     with st.spinner("Thinking…"):
                         result = ai.messages.create(
                             model="claude-sonnet-4-20250514",
-                            max_tokens=1024,
-                            system=SYSTEM_PROMPT,
+                            max_tokens=2048,
+                            system=dynamic_system,
                             messages=[{"role": m["role"], "content": m["content"]}
                                       for m in st.session_state.hoppr_chat],
                         )

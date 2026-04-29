@@ -749,12 +749,11 @@ Current data snapshot:
         with st.chat_message("assistant"):
             try:
                 import anthropic as _anthropic
-                api_key = os.getenv("ANTHROPIC_API_KEY", "")
-                if not api_key:
-                    try:
-                        api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-                    except Exception:
-                        pass
+                # Prefer st.secrets (authoritative on Streamlit Cloud)
+                try:
+                    api_key = st.secrets["ANTHROPIC_API_KEY"]
+                except Exception:
+                    api_key = os.getenv("ANTHROPIC_API_KEY", "")
                 if not api_key:
                     response = "⚠️ ANTHROPIC_API_KEY not configured."
                 else:

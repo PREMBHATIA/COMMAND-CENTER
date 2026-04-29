@@ -35,7 +35,20 @@ def load_alle_data():
             return pd.read_csv(path)
     return pd.DataFrame()
 
+@st.cache_data(ttl=1800)
+def load_meeting_summary():
+    """Fetch the Revised - Summary of Meetings (28 Apr) tab."""
+    try:
+        from services.sheets_client import fetch_alle_meeting_summary
+        df = fetch_alle_meeting_summary()
+        if not df.empty:
+            return df.values.tolist()
+    except Exception:
+        pass
+    return []
+
 raw = load_alle_data()
+raw_mtg_summary = load_meeting_summary()
 
 if raw.empty:
     st.warning("No All-e data found. Download the 'Active presales' tab from the All-e Foundry Presales Tracker sheet.")
@@ -149,70 +162,120 @@ gtm_target = pd.DataFrame({
     "T_Monthly_MRR": [0, 0, 0, 0, 0, 4000, 8000, 12000, 20000, 28000, 36000, 40000],
 })
 
-# Actuals — update these as new months complete
-gtm_actual_mtgs = {
-    "Jan": {
-        "meetings": ["Syngenta", "TTK", "Cello", "Rich", "Samsung", "Orient Bell", "MHR Dubai"],
-        "proposals": ["Canon"],
-    },
-    "Feb": {
-        "meetings": ["Nippon", "Prince", "Anmol", "Siyaram", "RR Cable", "Wipro", "Kajaria",
-                      "Dell", "Reebok", "Wakefit", "Versuni", "BBW", "Mondelez", "Frisian Flag", "Wipro"],
-        "proposals": ["Agricon", "Nippon", "Schneider"],
-    },
-    "Mar": {
-        "meetings": ["Crompton", "Eureka", "SRMB Steel", "Tata Consumer Prod", "Liberty Steel", "Makson", "Sunway"],
-        "proposals": ["Orient Bell"],
-    },
-}
-
-# Auto-detect meetings from Active presales sheet by first_conv date
+months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 MONTH_ABBR = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
               7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
 
-_pre2026_meetings = []
-if 'first_conv' in df.columns:
-    for _, row in df.iterrows():
-        if pd.notna(row.get('first_conv')):
-            conv_date = row['first_conv']
-            lead = str(row.get('lead_name', '')).strip()
-            if not lead:
-                continue
-            if conv_date.year < 2026:
-                if lead not in _pre2026_meetings:
-                    _pre2026_meetings.append(lead)
-                continue
-            m_abbr = MONTH_ABBR.get(conv_date.month)
-            if m_abbr and m_abbr not in gtm_actual_mtgs:
-                gtm_actual_mtgs[m_abbr] = {"meetings": [], "proposals": []}
-            if m_abbr:
-                if lead not in gtm_actual_mtgs[m_abbr]["meetings"]:
-                    gtm_actual_mtgs[m_abbr]["meetings"].append(lead)
-                status = str(row.get('status', '')).lower()
-                if 'proposal' in status and lead not in gtm_actual_mtgs[m_abbr]["proposals"]:
-                    gtm_actual_mtgs[m_abbr]["proposals"].append(lead)
+# ── Parse the "Revised - Summary of Meetings (28 Apr)" sheet ─────────────────
+# Grid layout: India cols 0-8, SEA cols 10-18 (col 9 = blank separator)
+# Section 1 (rows 1-8):  Source 1 (Greentern / Maddy)  → data starts row 3
+# Section 2 (rows 10-17): Source 2 (Graas Network)      → data starts row 12
+# Section 3 (rows 19-26): Overall with Actual / Target  → data starts row 21
 
-# Build actuals dataframe
-months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-actual_new_mtgs = []
+_SHEET_MONTHS = ["Jan", "Feb", "Mar", "Apr"]  # only months in this tab
+
+def _safe_int(val):
+    try:
+        s = str(val).strip()
+        return int(float(s)) if s else 0
+    except Exception:
+        return 0
+
+def _parse_source_section(grid, data_start_row, col_offset):
+    """Parse a 6-row source section (count + companies per month)."""
+    metric_keys = ["meetings", "positive", "others", "pocs", "pilots", "production"]
+    result = {}
+    for i, key in enumerate(metric_keys):
+        row_idx = data_start_row + i
+        if row_idx >= len(grid):
+            break
+        row = grid[row_idx]
+        result[key] = {}
+        for j, month in enumerate(_SHEET_MONTHS):
+            cnt_col = col_offset + 1 + j * 2
+            cos_col = col_offset + 2 + j * 2
+            result[key][month] = {
+                "count":     _safe_int(row[cnt_col]) if cnt_col < len(row) else 0,
+                "companies": str(row[cos_col]).strip() if cos_col < len(row) else "",
+            }
+    return result
+
+def _parse_overall_section(grid, data_start_row, col_offset):
+    """Parse the 6-row overall section (actual + target per month)."""
+    metric_keys = ["meetings", "positive", "others", "pocs", "pilots", "production"]
+    result = {}
+    for i, key in enumerate(metric_keys):
+        row_idx = data_start_row + i
+        if row_idx >= len(grid):
+            break
+        row = grid[row_idx]
+        result[key] = {}
+        for j, month in enumerate(_SHEET_MONTHS):
+            act_col = col_offset + 1 + j * 2
+            tgt_col = col_offset + 2 + j * 2
+            result[key][month] = {
+                "actual": _safe_int(row[act_col]) if act_col < len(row) else 0,
+                "target": _safe_int(row[tgt_col]) if tgt_col < len(row) else 0,
+            }
+    return result
+
+# Parse the sheet if available
+msummary = {}
+if raw_mtg_summary:
+    grid = raw_mtg_summary
+    msummary = {
+        "india": {
+            "greentern": _parse_source_section(grid, 3, 0),
+            "graas":     _parse_source_section(grid, 12, 0),
+            "overall":   _parse_overall_section(grid, 21, 0),
+        },
+        "sea": {
+            "partner": _parse_source_section(grid, 3, 10),
+            "graas":   _parse_source_section(grid, 12, 10),
+            "overall": _parse_overall_section(grid, 21, 10),
+        },
+    }
+
+# Build actuals arrays from the parsed summary (India + SEA combined)
+actual_new_mtgs   = []
 actual_cumul_mtgs = []
-actual_proposals = []
+actual_pocs       = []
 cumul = 0
 for m in months:
-    if m in gtm_actual_mtgs:
-        n = len(gtm_actual_mtgs[m]["meetings"])
-        p = len(gtm_actual_mtgs[m]["proposals"])
+    if msummary and m in _SHEET_MONTHS:
+        ind = msummary["india"]["overall"]["meetings"].get(m, {}).get("actual", 0)
+        sea = msummary["sea"]["overall"]["meetings"].get(m, {}).get("actual", 0)
+        ind_poc = msummary["india"]["overall"]["pocs"].get(m, {}).get("actual", 0)
+        sea_poc = msummary["sea"]["overall"]["pocs"].get(m, {}).get("actual", 0)
+        n = ind + sea
+        p = ind_poc + sea_poc
         cumul += n
+        actual_new_mtgs.append(n)
+        actual_cumul_mtgs.append(cumul)
+        actual_pocs.append(p)
     else:
-        n = None
-        p = None
-    actual_new_mtgs.append(n)
-    actual_cumul_mtgs.append(cumul if n is not None else None)
-    actual_proposals.append(p)
+        actual_new_mtgs.append(None)
+        actual_cumul_mtgs.append(None)
+        actual_pocs.append(None)
 
-gtm_target["A_New_Mtgs"] = actual_new_mtgs
+# Proposals from Active presales sheet (status-based)
+actual_proposals = []
+for m in months:
+    if m in _SHEET_MONTHS and 'first_conv' in df.columns:
+        month_num = list(MONTH_ABBR.keys())[list(MONTH_ABBR.values()).index(m)]
+        props = df[
+            (df['first_conv'].dt.month == month_num) &
+            (df['first_conv'].dt.year == 2026) &
+            (df.get('status', pd.Series(dtype=str)).str.lower().str.contains('proposal', na=False))
+        ]
+        actual_proposals.append(len(props))
+    else:
+        actual_proposals.append(None)
+
+gtm_target["A_New_Mtgs"]   = actual_new_mtgs
 gtm_target["A_Cumul_Mtgs"] = actual_cumul_mtgs
-gtm_target["A_Proposals"] = actual_proposals
+gtm_target["A_Proposals"]  = actual_proposals
+gtm_target["A_POCs"]       = actual_pocs
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -221,39 +284,38 @@ gtm_target["A_Proposals"] = actual_proposals
 
 with tab_gtm:
     st.markdown("### 2026 Execution & Revenue Roadmap")
-    st.caption("Tracking against AOP targets — cumulative figures, pilot revenue recognized at month of start")
+    st.caption("Live data from [Revised - Summary of Meetings (28 Apr)](https://docs.google.com/spreadsheets/d/1lK9AJNA8-vVLPtkUWEq818DHnHWAsrCXgCq7vrvWLnI/edit?gid=1385475614#gid=1385475614) · India + SEA combined vs AOP targets")
 
-    # Current month detection — auto from today
+    if not msummary:
+        st.warning("Meeting summary sheet not loaded — showing targets only.")
+
     current_month_idx = datetime.now().month - 1  # 0-based (Apr = 3)
 
     # ── KPI Cards — YTD ───────────────────────────────────────────────────────
-    ytd_target_mtgs = gtm_target.loc[current_month_idx, "T_Cumul_Mtgs"]
-    ytd_actual_mtgs = gtm_target.loc[current_month_idx, "A_Cumul_Mtgs"] or 0
-    ytd_ach_mtgs = f"{ytd_actual_mtgs/ytd_target_mtgs*100:.0f}%" if ytd_target_mtgs else "—"
-
-    ytd_target_pocs = gtm_target.loc[current_month_idx, "T_Free_POCs"]
-    # Count proposals as proxy for POC pipeline
-    ytd_actual_proposals = sum(p for p in actual_proposals[:current_month_idx+1] if p is not None)
+    ytd_target_mtgs = int(gtm_target.loc[current_month_idx, "T_Cumul_Mtgs"])
+    ytd_actual_mtgs = int(gtm_target.loc[current_month_idx, "A_Cumul_Mtgs"] or 0)
+    ytd_ach_mtgs    = f"{ytd_actual_mtgs/ytd_target_mtgs*100:.0f}%" if ytd_target_mtgs else "—"
+    ytd_actual_pocs = int(sum(p for p in actual_pocs[:current_month_idx+1] if p is not None))
+    ytd_target_pocs = int(gtm_target.loc[current_month_idx, "T_Free_POCs"])
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(f"Cumul. Meetings ({months[current_month_idx]})", f"{ytd_actual_mtgs}", f"{ytd_ach_mtgs} of {ytd_target_mtgs} target")
+        st.metric(f"Meetings YTD ({months[current_month_idx]})",
+                  f"{ytd_actual_mtgs}", f"{ytd_ach_mtgs} of {ytd_target_mtgs} target")
     with c2:
-        st.metric("Proposals Sent (YTD)", ytd_actual_proposals, f"Target POCs: {ytd_target_pocs}")
+        poc_ach = f"{ytd_actual_pocs/ytd_target_pocs*100:.0f}%" if ytd_target_pocs else "—"
+        st.metric("POCs Completed (YTD)", ytd_actual_pocs, f"{poc_ach} of {ytd_target_pocs} target")
     with c3:
         st.metric("Pilots Started (Target)", gtm_target.loc[current_month_idx, "T_Pilots_Started"])
     with c4:
         st.metric("Pilot Revenue (Target)", f"${gtm_target.loc[current_month_idx, 'T_Pilot_Revenue']:,}")
 
-    # ── Meetings: Target vs Actual Chart (Jan–current month only) ──────────────
-    st.markdown("### New Meetings — Target vs Actual")
+    # ── Meetings: Target vs Actual (Jan → current month) ─────────────────────
+    st.markdown("### 📊 New Meetings — Target vs Actual")
 
-    _chart_months = months[:current_month_idx + 1]
-    _chart_targets = gtm_target["T_New_Mtgs"].iloc[:current_month_idx + 1]
+    _chart_months  = months[:current_month_idx + 1]
+    _chart_targets = gtm_target["T_New_Mtgs"].iloc[:current_month_idx + 1].tolist()
     _chart_actuals = actual_new_mtgs[:current_month_idx + 1]
-
-    if _pre2026_meetings:
-        st.caption(f"ℹ️ {len(_pre2026_meetings)} leads from pre-2026 not shown: {', '.join(_pre2026_meetings[:8])}{'…' if len(_pre2026_meetings) > 8 else ''}")
 
     fig_mtgs = go.Figure()
     fig_mtgs.add_trace(go.Bar(
@@ -261,69 +323,184 @@ with tab_gtm:
         name="Target", marker_color="#374151",
     ))
     actual_bars = [v if v is not None else 0 for v in _chart_actuals]
-    colors = []
-    for i, (a, t) in enumerate(zip(actual_bars, _chart_targets)):
-        if _chart_actuals[i] is None:
-            colors.append("#1a1a2e")
-        elif a >= t:
-            colors.append("#10B981")  # met target
-        else:
-            colors.append("#EF4444")  # missed
+    bar_colors  = [
+        "#10B981" if a >= t else "#EF4444"
+        for a, t in zip(actual_bars, _chart_targets)
+    ]
     fig_mtgs.add_trace(go.Bar(
         x=_chart_months, y=actual_bars,
-        name="Actual", marker_color=colors,
+        name="Actual", marker_color=bar_colors,
     ))
     fig_mtgs.update_layout(
-        barmode="group", height=350, template="plotly_dark",
-        margin=dict(l=20, r=20, t=20, b=20),
+        barmode="group", height=320, template="plotly_dark",
+        margin=dict(l=20, r=20, t=10, b=20),
     )
     st.plotly_chart(fig_mtgs, use_container_width=True)
 
-    # ── Cumulative Meetings Chart (Jan–current month only) ───────────────────
-    st.markdown("### Cumulative Meetings — Target vs Actual")
+    # ── Cumulative Meetings ───────────────────────────────────────────────────
+    st.markdown("### 📈 Cumulative Meetings — Target vs Actual")
     fig_cumul = go.Figure()
     fig_cumul.add_trace(go.Scatter(
-        x=_chart_months, y=gtm_target["T_Cumul_Mtgs"].iloc[:current_month_idx+1],
+        x=_chart_months, y=gtm_target["T_Cumul_Mtgs"].iloc[:current_month_idx+1].tolist(),
         mode="lines+markers", name="Target",
         line=dict(color="#6B7280", dash="dash", width=2),
     ))
     actual_cumul_plot = [v for v in actual_cumul_mtgs[:current_month_idx+1] if v is not None]
     fig_cumul.add_trace(go.Scatter(
-        x=_chart_months[:len(actual_cumul_plot)],
-        y=actual_cumul_plot,
+        x=_chart_months[:len(actual_cumul_plot)], y=actual_cumul_plot,
         mode="lines+markers", name="Actual",
-        line=dict(color="#4F46E5", width=3),
-        marker=dict(size=10),
+        line=dict(color="#4F46E5", width=3), marker=dict(size=10),
     ))
     fig_cumul.update_layout(
-        height=350, template="plotly_dark",
-        margin=dict(l=20, r=20, t=20, b=20),
+        height=300, template="plotly_dark",
+        margin=dict(l=20, r=20, t=10, b=20),
     )
     st.plotly_chart(fig_cumul, use_container_width=True)
 
+    # ── India vs SEA Breakdown ────────────────────────────────────────────────
+    if msummary:
+        st.markdown("---")
+        st.markdown("### 🌏 India vs SEA Breakdown")
+
+        _done_months = [m for m in _SHEET_MONTHS if m in _chart_months]
+        breakdown_rows = []
+        for m in _done_months:
+            ind_act = msummary["india"]["overall"]["meetings"].get(m, {}).get("actual", 0)
+            ind_tgt = msummary["india"]["overall"]["meetings"].get(m, {}).get("target", 0)
+            sea_act = msummary["sea"]["overall"]["meetings"].get(m, {}).get("actual", 0)
+            sea_tgt = msummary["sea"]["overall"]["meetings"].get(m, {}).get("target", 0)
+            ind_pos = msummary["india"]["overall"]["positive"].get(m, {}).get("actual", 0)
+            sea_pos = msummary["sea"]["overall"]["positive"].get(m, {}).get("actual", 0)
+            ind_poc = msummary["india"]["overall"]["pocs"].get(m, {}).get("actual", 0)
+            sea_poc = msummary["sea"]["overall"]["pocs"].get(m, {}).get("actual", 0)
+            breakdown_rows.append({
+                "Month": m,
+                "India Mtgs": ind_act,
+                "India Target": ind_tgt,
+                "India Positive": ind_pos,
+                "India POCs": ind_poc,
+                "SEA Mtgs": sea_act,
+                "SEA Target": sea_tgt,
+                "SEA Positive": sea_pos,
+                "SEA POCs": sea_poc,
+                "Total": ind_act + sea_act,
+            })
+
+        if breakdown_rows:
+            bdf = pd.DataFrame(breakdown_rows)
+            st.dataframe(bdf, use_container_width=True, hide_index=True)
+
+            # Stacked bar: India vs SEA
+            fig_geo = go.Figure()
+            fig_geo.add_trace(go.Bar(
+                x=bdf["Month"], y=bdf["India Mtgs"],
+                name="India", marker_color="#4F46E5",
+            ))
+            fig_geo.add_trace(go.Bar(
+                x=bdf["Month"], y=bdf["SEA Mtgs"],
+                name="SEA", marker_color="#10B981",
+            ))
+            fig_geo.update_layout(
+                barmode="stack", height=280, template="plotly_dark",
+                margin=dict(l=20, r=20, t=10, b=20),
+                title="Meetings by Region",
+            )
+            st.plotly_chart(fig_geo, use_container_width=True)
+
+        # ── By Source (India) ─────────────────────────────────────────────────
+        st.markdown("### 🤝 India — By Source")
+        source_rows = []
+        for m in _done_months:
+            gt_cnt = msummary["india"]["greentern"]["meetings"].get(m, {}).get("count", 0)
+            gt_cos = msummary["india"]["greentern"]["meetings"].get(m, {}).get("companies", "")
+            gn_cnt = msummary["india"]["graas"]["meetings"].get(m, {}).get("count", 0)
+            gn_cos = msummary["india"]["graas"]["meetings"].get(m, {}).get("companies", "")
+            gt_poc = msummary["india"]["greentern"]["pocs"].get(m, {}).get("count", 0)
+            gn_poc = msummary["india"]["graas"]["pocs"].get(m, {}).get("count", 0)
+            source_rows.append({
+                "Month": m,
+                "Greentern Mtgs": gt_cnt,
+                "Greentern Companies": gt_cos,
+                "Graas Network Mtgs": gn_cnt,
+                "Graas Network Companies": gn_cos,
+                "Greentern POCs": gt_poc,
+                "Graas POCs": gn_poc,
+            })
+
+        for row in source_rows:
+            m = row["Month"]
+            with st.expander(f"**{m}** — Greentern: {row['Greentern Mtgs']} meetings · Graas Network: {row['Graas Network Mtgs']} meetings"):
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    st.markdown(f"**🤝 Greentern** ({row['Greentern Mtgs']} meetings, {row['Greentern POCs']} POCs)")
+                    if row["Greentern Companies"]:
+                        for co in row["Greentern Companies"].split(","):
+                            co = co.strip()
+                            if co:
+                                st.markdown(f"  - {co}")
+                with col_r:
+                    st.markdown(f"**🏢 Graas Network** ({row['Graas Network Mtgs']} meetings, {row['Graas POCs']} POCs)")
+                    if row["Graas Network Companies"]:
+                        for co in row["Graas Network Companies"].split(","):
+                            co = co.strip()
+                            if co:
+                                st.markdown(f"  - {co}")
+
+        # ── SEA Source Breakdown ──────────────────────────────────────────────
+        st.markdown("### 🌏 SEA — By Source")
+        sea_source_rows = []
+        for m in _done_months:
+            pt_cnt = msummary["sea"]["partner"]["meetings"].get(m, {}).get("count", 0)
+            pt_cos = msummary["sea"]["partner"]["meetings"].get(m, {}).get("companies", "")
+            gn_cnt = msummary["sea"]["graas"]["meetings"].get(m, {}).get("count", 0)
+            gn_cos = msummary["sea"]["graas"]["meetings"].get(m, {}).get("companies", "")
+            sea_source_rows.append({
+                "Month": m,
+                "Partner Mtgs": pt_cnt,
+                "Partner Companies": pt_cos,
+                "Graas Network Mtgs": gn_cnt,
+                "Graas Network Companies": gn_cos,
+            })
+
+        for row in sea_source_rows:
+            m = row["Month"]
+            with st.expander(f"**{m}** — Partner (Maddy/Haku): {row['Partner Mtgs']} meetings · Graas Network: {row['Graas Network Mtgs']} meetings"):
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    st.markdown(f"**🤝 Partner** ({row['Partner Mtgs']} meetings)")
+                    if row["Partner Companies"]:
+                        for co in row["Partner Companies"].split(","):
+                            co = co.strip()
+                            if co:
+                                st.markdown(f"  - {co}")
+                with col_r:
+                    st.markdown(f"**🏢 Graas Network** ({row['Graas Network Mtgs']} meetings)")
+                    if row["Graas Network Companies"]:
+                        for co in row["Graas Network Companies"].split(","):
+                            co = co.strip()
+                            if co:
+                                st.markdown(f"  - {co}")
+
     # ── Full Roadmap Table ────────────────────────────────────────────────────
-    st.markdown("### Full Roadmap — Targets")
-
-    # Show only up to current month + 1
-    roadmap_display = gtm_target.iloc[:current_month_idx + 2][["Month", "T_New_Mtgs", "T_Cumul_Mtgs", "T_Free_POCs",
-                                   "T_Pilots_Started", "T_Pilots_Finished", "T_Live_Customers",
-                                   "T_Pilot_Revenue", "T_Monthly_MRR",
-                                   "A_New_Mtgs", "A_Cumul_Mtgs", "A_Proposals"]].copy()
-
+    st.markdown("---")
+    st.markdown("### Full Roadmap — Targets vs Actuals")
+    roadmap_display = gtm_target.iloc[:current_month_idx + 2][[
+        "Month", "T_New_Mtgs", "T_Cumul_Mtgs", "T_Free_POCs",
+        "T_Pilots_Started", "T_Pilots_Finished", "T_Live_Customers",
+        "T_Pilot_Revenue", "T_Monthly_MRR",
+        "A_New_Mtgs", "A_Cumul_Mtgs", "A_POCs",
+    ]].copy()
     roadmap_display["T_Pilot_Revenue"] = roadmap_display["T_Pilot_Revenue"].apply(lambda x: f"${x:,}")
-    roadmap_display["T_Monthly_MRR"] = roadmap_display["T_Monthly_MRR"].apply(lambda x: f"${x:,}")
-
+    roadmap_display["T_Monthly_MRR"]   = roadmap_display["T_Monthly_MRR"].apply(lambda x: f"${x:,}")
     roadmap_display = roadmap_display.rename(columns={
         "T_New_Mtgs": "Target Mtgs", "T_Cumul_Mtgs": "Target Cumul",
         "T_Free_POCs": "Target POCs", "T_Pilots_Started": "Target Pilots",
         "T_Pilots_Finished": "Pilots Done", "T_Live_Customers": "Live Cust",
         "T_Pilot_Revenue": "Pilot Rev", "T_Monthly_MRR": "MRR",
         "A_New_Mtgs": "Actual Mtgs", "A_Cumul_Mtgs": "Actual Cumul",
-        "A_Proposals": "Proposals",
+        "A_POCs": "Actual POCs",
     })
-
     st.dataframe(roadmap_display, use_container_width=True, hide_index=True)
-
     st.caption("Assumption: 13 Paid Pilots → 10 Customers in Production = $195K + $148K = **$343K invoiced revenue in 2026**")
 
 

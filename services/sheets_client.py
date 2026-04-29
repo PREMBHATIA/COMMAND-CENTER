@@ -208,6 +208,12 @@ def fetch_alle_gtm_india(force_refresh: bool = False) -> pd.DataFrame:
     return fetch_sheet_tab(sheet_id, "2026 - GTM India", force_refresh)
 
 
+def fetch_alle_meeting_summary(force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch the 'Revised - Summary of Meetings (28 Apr)' tab as a raw grid."""
+    sheet_id = os.getenv("ALLE_SHEET_ID", "")
+    return fetch_sheet_tab_raw(sheet_id, "Revised - Summary of Meetings (28 Apr)", force_refresh)
+
+
 def _get_service_account_creds() -> Optional[Credentials]:
     """Return service account Credentials (or None) using the same lookup as _get_client."""
     try:

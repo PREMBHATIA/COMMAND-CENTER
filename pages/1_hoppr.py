@@ -162,23 +162,30 @@ with tab_funnel:
             st.metric("New Signups (7d)", f"{tw_n:,}", safe_delta(tw_n, lw_n))
 
         # Date range filter
+        _min_date = daily["date"].min().date()
+        _max_date = daily["date"].max().date()
         date_range = st.date_input(
             "Date Range",
-            value=(daily["date"].min().date(), daily["date"].max().date()),
+            value=(_min_date, _max_date),
+            min_value=_min_date,
+            max_value=_max_date,
             key="hoppr_dates",
         )
-        if len(date_range) == 2:
-            date_mask = (daily["date"].dt.date >= date_range[0]) & (daily["date"].dt.date <= date_range[1])
+        # Normalise: date_input returns a 1-tuple while user is mid-selection
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            start_ts = pd.Timestamp(date_range[0])
+            end_ts = pd.Timestamp(date_range[1])
+            date_mask = (daily["date"] >= start_ts) & (daily["date"] <= end_ts)
             daily_f = daily[date_mask]
-            # Also filter country data by the same date range
             if not country.empty and "date" in country.columns:
-                ctry_mask = (country["date"].dt.date >= date_range[0]) & (country["date"].dt.date <= date_range[1])
-                country_f = country[ctry_mask]
+                country_f = country[(country["date"] >= start_ts) & (country["date"] <= end_ts)]
             else:
                 country_f = country
+            st.caption(f"Filtered: **{date_range[0]}** → **{date_range[1]}** | {len(daily_f)} days of data")
         else:
             daily_f = daily
             country_f = country
+            st.caption(f"Showing all data: **{_min_date}** → **{_max_date}** | {len(daily_f)} days")
 
         # Main trend chart
         fig_trend = go.Figure()

@@ -216,21 +216,18 @@ if not raw_user_state.empty:
             "action":    vals[8] if len(vals) > 8 else "",
         })
 
-# Enrich sellers with user/query data from eval sheet
-if not eval_processed.empty and sellers:
-    for _, row in eval_processed.iterrows():
-        sid = row["_seller"]
-        em  = row["_email"]
-        dt  = str(row["_date"])[:10]
-        if not sid or not em or sid == "nan" or em == "nan":
-            continue
-        if sid not in seller_users_map:
-            seller_users_map[sid] = {}
-        if em not in seller_users_map[sid]:
-            seller_users_map[sid][em] = {"dates": [], "count": 0}
-        seller_users_map[sid][em]["count"] += 1
-        if dt and dt != "nan":
-            seller_users_map[sid][em]["dates"].append(dt)
+# Enrich sellers with user/query data from eval sheet (vectorised — no iterrows)
+if not eval_processed.empty and sellers and "_email" in eval_processed.columns:
+    _ev = eval_processed[["_seller", "_email", "_date"]].copy()
+    _ev = _ev[_ev["_seller"].notna() & _ev["_email"].notna()]
+    _ev = _ev[(_ev["_seller"] != "nan") & (_ev["_email"] != "nan") & (_ev["_email"] != "")]
+
+    # Build seller → {email → {count, dates}} map via groupby
+    for sid, grp in _ev.groupby("_seller", sort=False):
+        seller_users_map[sid] = {}
+        for em, eg in grp.groupby("_email", sort=False):
+            dates = eg["_date"].dropna().dt.strftime("%Y-%m-%d").tolist()
+            seller_users_map[sid][em] = {"count": len(eg), "dates": dates}
 
     for s in sellers:
         sid = s["seller_id"]
@@ -241,6 +238,11 @@ if not eval_processed.empty and sellers:
         else:
             s["user_count"]   = 1
             s["all_emails"]   = [s["email"]]
+else:
+    # No eval data — give every seller safe defaults
+    for s in sellers:
+        s.setdefault("user_count", 1)
+        s.setdefault("all_emails", [s.get("email", "")])
 
 # ── Period filter helper ──────────────────────────────────────────────────────
 
@@ -312,8 +314,8 @@ with tab_home:
         else:
             daily_f, country_f = daily, country
 
-        f_start = daily_f["date"].min().strftime("%-d %b %Y") if not daily_f.empty else "—"
-        f_end   = daily_f["date"].max().strftime("%-d %b %Y") if not daily_f.empty else "—"
+        f_start = daily_f["date"].min().strftime("%d %b %Y").lstrip("0") if not daily_f.empty else "—"
+        f_end   = daily_f["date"].max().strftime("%d %b %Y").lstrip("0") if not daily_f.empty else "—"
         st.caption(f"📅 {f_start} → {f_end} · {len(daily_f)} days")
 
         # Trend chart
@@ -610,7 +612,10 @@ with tab_accounts:
                     "Last Active":    str(em_dates[-1])[:10] if em_dates else "—",
                 })
             user_rows.sort(key=lambda x: -x["Queries"])
-            st.dataframe(pd.DataFrame(user_rows), use_container_width=True, hide_index=True)
+            if user_rows:
+                st.dataframe(pd.DataFrame(user_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No user email data found for this account.")
 
             # ── AI analysis ───────────────────────────────────────────────
             if us.get("summary") or us.get("reason"):
@@ -625,6 +630,8 @@ with tab_accounts:
 
             # ── Query timeline ────────────────────────────────────────────
             st.markdown("#### 📋 Query Timeline")
+            if acct_f.empty:
+                st.info("No queries in this period. Try a wider time window.")
             timeline = acct_f.sort_values("_date", ascending=False).head(100)
 
             for _, qrow in timeline.iterrows():

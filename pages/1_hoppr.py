@@ -161,24 +161,22 @@ with tab_funnel:
             lw_n = last_week["new_signups"].sum()
             st.metric("New Signups (7d)", f"{tw_n:,}", safe_delta(tw_n, lw_n))
 
-        # Date range filter
-        _min_date = daily["date"].min().date()
-        _max_date = daily["date"].max().date()
-        date_range = st.date_input(
-            "Date Range",
-            value=(_min_date, _max_date),
-            key="hoppr_dates",
+        # Period selector — filters actual data passed to chart
+        period = st.radio(
+            "Period",
+            ["1W", "1M", "3M", "All"],
+            index=1,
+            horizontal=True,
+            key="hoppr_period",
         )
-        # Normalise: date_input returns a 1-tuple while user is mid-selection
-        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-            start_ts = pd.Timestamp(date_range[0])
-            end_ts = pd.Timestamp(date_range[1])
-            date_mask = (daily["date"] >= start_ts) & (daily["date"] <= end_ts)
-            daily_f = daily[date_mask]
-            if not country.empty and "date" in country.columns:
-                country_f = country[(country["date"] >= start_ts) & (country["date"] <= end_ts)]
-            else:
-                country_f = country
+        today_ts = daily["date"].max()
+        cutoffs = {"1W": today_ts - pd.Timedelta(days=7),
+                   "1M": today_ts - pd.Timedelta(days=30),
+                   "3M": today_ts - pd.Timedelta(days=90)}
+        if period in cutoffs:
+            cutoff = cutoffs[period]
+            daily_f = daily[daily["date"] >= cutoff]
+            country_f = country[country["date"] >= cutoff] if not country.empty and "date" in country.columns else country
         else:
             daily_f = daily
             country_f = country
@@ -192,26 +190,7 @@ with tab_funnel:
         fig_trend.add_trace(go.Scatter(x=daily_f["date"], y=daily_f["new_signups"],
                                        mode="lines+markers", name="New Signups",
                                        line=dict(color="#10B981", dash="dot")))
-        fig_trend.update_layout(
-            height=380,
-            template="plotly_dark",
-            margin=dict(l=20, r=20, t=40, b=20),
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=[
-                        dict(count=7,  label="1W",  step="day",   stepmode="backward"),
-                        dict(count=1,  label="1M",  step="month", stepmode="backward"),
-                        dict(count=3,  label="3M",  step="month", stepmode="backward"),
-                        dict(step="all", label="All"),
-                    ],
-                    bgcolor="#1e1e2e",
-                    activecolor="#4F46E5",
-                    font=dict(color="white"),
-                ),
-                rangeslider=dict(visible=True, thickness=0.06),
-                type="date",
-            ),
-        )
+        fig_trend.update_layout(height=380, template="plotly_dark", margin=dict(l=20, r=20, t=20, b=20))
         st.plotly_chart(fig_trend, use_container_width=True)
 
         # Country breakdown — filtered by selected date range

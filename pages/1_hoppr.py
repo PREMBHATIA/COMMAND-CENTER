@@ -9,7 +9,8 @@ import sys
 import re
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from services.data_processor import process_hoppr_daily, process_hoppr_country, compute_hoppr_wow, detect_anomalies
+from services.data_processor import (process_hoppr_daily, process_hoppr_daily_from_eval,
+                                       process_hoppr_country, compute_hoppr_wow, detect_anomalies)
 
 st.set_page_config(page_title="Hoppr Usage | Graas", page_icon="📊", layout="wide")
 st.markdown("## 📊 Hoppr Dashboard")
@@ -107,8 +108,19 @@ if st.button("🔄 Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
-# Process daily data
-daily = process_hoppr_daily(raw_daily) if not raw_daily.empty else pd.DataFrame()
+# Build daily metrics — prefer Evaluation_sheet (full history back to Oct 2025)
+# over Hoppr__Anaysis which only started April 2026.
+daily_from_analysis = process_hoppr_daily(raw_daily) if not raw_daily.empty else pd.DataFrame()
+daily_from_eval     = process_hoppr_daily_from_eval(raw_eval) if not raw_eval.empty else pd.DataFrame()
+
+if not daily_from_eval.empty and (
+    daily_from_analysis.empty
+    or len(daily_from_eval) > len(daily_from_analysis) + 7  # eval has meaningfully more history
+):
+    daily = daily_from_eval
+else:
+    daily = daily_from_analysis
+
 country = process_hoppr_country(raw_daily) if not raw_daily.empty else pd.DataFrame()
 
 # ══════════════════════════════════════════════════════════════════════════════

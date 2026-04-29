@@ -120,6 +120,52 @@ def process_hoppr_country(df: pd.DataFrame) -> pd.DataFrame:
     return result.sort_values("date").reset_index(drop=True)
 
 
+def process_hoppr_daily_from_eval(df: pd.DataFrame) -> pd.DataFrame:
+    """Build daily usage metrics by aggregating the Evaluation_sheet per-query log.
+
+    Returns the same column schema as process_hoppr_daily() so the two are
+    interchangeable in hoppr.py.
+    Columns: date, total_queries, unique_users, unique_sellers,
+             new_signups (0), repeat_guests (0), login_from_tc (0), login_from_hoppr (0)
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    cols = [str(c).strip() for c in df.columns]
+    df = df.copy()
+    df.columns = cols
+
+    sid_col   = next((c for c in cols if "seller" in c.lower() and "id" in c.lower()), None)
+    email_col = next((c for c in cols if "email" in c.lower()), None)
+    date_col  = next((c for c in cols if c.lower() == "date"), None)
+
+    if not (sid_col and email_col and date_col):
+        return pd.DataFrame()
+
+    work = df[[sid_col, email_col, date_col]].copy()
+    work["_date"] = pd.to_datetime(work[date_col], errors="coerce")
+    work = work.dropna(subset=["_date"])
+    if work.empty:
+        return pd.DataFrame()
+
+    daily = (
+        work.groupby("_date")
+        .agg(
+            total_queries=(email_col, "count"),
+            unique_users=(email_col, "nunique"),
+            unique_sellers=(sid_col, "nunique"),
+        )
+        .reset_index()
+        .rename(columns={"_date": "date"})
+    )
+    daily["new_signups"]      = 0
+    daily["repeat_guests"]    = 0
+    daily["login_from_tc"]    = 0
+    daily["login_from_hoppr"] = 0
+
+    return daily.sort_values("date").reset_index(drop=True)
+
+
 def compute_hoppr_wow(daily: pd.DataFrame) -> pd.DataFrame:
     """Compute week-over-week changes for Hoppr metrics."""
     if daily.empty:

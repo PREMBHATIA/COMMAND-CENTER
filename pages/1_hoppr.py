@@ -168,10 +168,17 @@ with tab_funnel:
             key="hoppr_dates",
         )
         if len(date_range) == 2:
-            mask = (daily["date"].dt.date >= date_range[0]) & (daily["date"].dt.date <= date_range[1])
-            daily_f = daily[mask]
+            date_mask = (daily["date"].dt.date >= date_range[0]) & (daily["date"].dt.date <= date_range[1])
+            daily_f = daily[date_mask]
+            # Also filter country data by the same date range
+            if not country.empty and "date" in country.columns:
+                ctry_mask = (country["date"].dt.date >= date_range[0]) & (country["date"].dt.date <= date_range[1])
+                country_f = country[ctry_mask]
+            else:
+                country_f = country
         else:
             daily_f = daily
+            country_f = country
 
         # Main trend chart
         fig_trend = go.Figure()
@@ -185,10 +192,10 @@ with tab_funnel:
         fig_trend.update_layout(height=380, template="plotly_dark", margin=dict(l=20, r=20, t=20, b=20))
         st.plotly_chart(fig_trend, use_container_width=True)
 
-        # Country breakdown
-        if not country.empty:
+        # Country breakdown — filtered by selected date range
+        if not country_f.empty:
             st.markdown("### By Country")
-            ca = country.groupby("country").agg({"total_queries": "sum", "unique_sellers": "sum"}).reset_index()
+            ca = country_f.groupby("country").agg({"total_queries": "sum", "unique_sellers": "sum"}).reset_index()
             ca = ca[ca["country"] != "Unknown"].sort_values("total_queries", ascending=True)
             fig_c = px.bar(ca, x="total_queries", y="country", orientation="h",
                            color_discrete_sequence=["#4F46E5"])

@@ -167,8 +167,6 @@ with tab_funnel:
         date_range = st.date_input(
             "Date Range",
             value=(_min_date, _max_date),
-            min_value=_min_date,
-            max_value=_max_date,
             key="hoppr_dates",
         )
         # Normalise: date_input returns a 1-tuple while user is mid-selection
@@ -181,11 +179,9 @@ with tab_funnel:
                 country_f = country[(country["date"] >= start_ts) & (country["date"] <= end_ts)]
             else:
                 country_f = country
-            st.caption(f"Filtered: **{date_range[0]}** → **{date_range[1]}** | {len(daily_f)} days of data")
         else:
             daily_f = daily
             country_f = country
-            st.caption(f"Showing all data: **{_min_date}** → **{_max_date}** | {len(daily_f)} days")
 
         # Main trend chart
         fig_trend = go.Figure()
@@ -196,7 +192,26 @@ with tab_funnel:
         fig_trend.add_trace(go.Scatter(x=daily_f["date"], y=daily_f["new_signups"],
                                        mode="lines+markers", name="New Signups",
                                        line=dict(color="#10B981", dash="dot")))
-        fig_trend.update_layout(height=380, template="plotly_dark", margin=dict(l=20, r=20, t=20, b=20))
+        fig_trend.update_layout(
+            height=380,
+            template="plotly_dark",
+            margin=dict(l=20, r=20, t=40, b=20),
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=[
+                        dict(count=7,  label="1W",  step="day",   stepmode="backward"),
+                        dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                        dict(count=3,  label="3M",  step="month", stepmode="backward"),
+                        dict(step="all", label="All"),
+                    ],
+                    bgcolor="#1e1e2e",
+                    activecolor="#4F46E5",
+                    font=dict(color="white"),
+                ),
+                rangeslider=dict(visible=True, thickness=0.06),
+                type="date",
+            ),
+        )
         st.plotly_chart(fig_trend, use_container_width=True)
 
         # Country breakdown — filtered by selected date range

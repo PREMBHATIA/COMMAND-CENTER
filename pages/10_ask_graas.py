@@ -36,7 +36,12 @@ st.caption("Ask anything about your business — Finance, AR, Pipeline, Product 
 
 # ── Check API Key ────────────────────────────────────────────────────────────
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Prefer Streamlit Cloud secrets (authoritative); fall back to os.getenv / .env
+try:
+    ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
+except Exception:
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
 if not ANTHROPIC_API_KEY:
     st.warning("Add your Anthropic API key to `.env` as `ANTHROPIC_API_KEY=sk-ant-...` to enable the chat.")
     st.code("# In your .env file:\nANTHROPIC_API_KEY=sk-ant-api03-xxxxx", language="bash")

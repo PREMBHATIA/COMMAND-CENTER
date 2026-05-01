@@ -1,5 +1,6 @@
 """All-e — Foundry Presales Pipeline & CRM."""
 
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -136,13 +137,14 @@ else:
 
 # ══════════════════════════════════════════════════════════════════════════════
 
-tab_gtm, tab_notes, tab_pipeline, tab_deals, tab_stale, tab_analytics = st.tabs([
+tab_gtm, tab_notes, tab_pipeline, tab_deals, tab_stale, tab_analytics, tab_ask = st.tabs([
     "🎯 GTM Tracker",
     "📝 Meeting Notes",
     "🔄 Pipeline",
     "📋 Active Deals",
     "⏰ Needs Follow-up",
     "📊 Analytics",
+    "💬 Ask Graas",
 ])
 
 
@@ -1043,3 +1045,215 @@ with tab_analytics:
         fig_time = px.bar(monthly, x='month', y='New Leads', color_discrete_sequence=['#7C3AED'])
         fig_time.update_layout(height=300, template="plotly_dark", xaxis_title="Month", margin=dict(l=20, r=20, t=20, b=20))
         st.plotly_chart(fig_time, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: ASK GRAAS  (Sales Hub — pipeline + meeting notes + KB only)
+#                  ⚠️  NO Finance P&L / AR / Turbo / Hoppr data
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_ask:
+    st.markdown("### 💬 Ask Graas — All-e Sales Assistant")
+    st.caption(
+        "Ask about pipeline, discovery questions, meeting notes, and deal strategy. "
+        "**Sales data only** — no financial, AR, or P&L metrics."
+    )
+
+    # ── Data loaders (sales-scoped) ───────────────────────────────────────────
+
+    @st.cache_data(ttl=14400)
+    def _load_alle_kb_sales():
+        """Fetch the All-e Knowledge Base Google Doc (text export)."""
+        try:
+            from services.sheets_client import fetch_google_doc_text
+            return fetch_google_doc_text("11-lE1Pfwf4XR_hWNwORuJund25wbKWxhOOFlZz7uX7c")
+        except Exception:
+            return ""
+
+    @st.cache_data(ttl=1800)
+    def _fetch_slack_notes_sales():
+        """Pull recent Slack meeting notes for the sales assistant."""
+        try:
+            from services.slack_notes import fetch_meeting_notes
+            notes = fetch_meeting_notes(lookback_days=30)
+            if notes:
+                return notes
+        except Exception:
+            pass
+        return None
+
+    # ── Context builders ──────────────────────────────────────────────────────
+
+    def _build_sales_pipeline_ctx(pipeline_df):
+        lines = ["=== ALL-E PRESALES PIPELINE ==="]
+        lines.append(f"Total active leads: {len(pipeline_df)}")
+        if "status" in pipeline_df.columns:
+            for status, grp in pipeline_df.groupby("status", sort=False):
+                lines.append(f"\n{status} ({len(grp)} leads):")
+                for _, row in grp.iterrows():
+                    lead     = row.get("lead_name", "")
+                    vertical = row.get("vertical", "")
+                    source   = row.get("source", "")
+                    agents   = row.get("agents", "")
+                    days     = int(row["days_since_contact"]) if pd.notna(row.get("days_since_contact")) else None
+                    since    = f", {days}d since last contact" if days is not None else ""
+                    conv     = str(row.get("conv_details", ""))[:200].strip()
+                    lines.append(f"  - {lead} | {vertical} | Source: {source} | Products: {agents}{since}")
+                    if conv:
+                        lines.append(f"    Latest note: {conv}")
+        return "\n".join(lines)
+
+    def _build_mtg_summary_ctx(summary):
+        if not summary:
+            return ""
+        lines = ["=== GTM MEETING TRACKER (YTD) ==="]
+        for region, label in [("india", "India"), ("sea", "SEA")]:
+            lines.append(f"\n{label}:")
+            for m in _SHEET_MONTHS:
+                overall = summary[region]["overall"]
+                mtgs = overall["meetings"].get(m, {}).get("actual", 0)
+                tgt  = overall["meetings"].get(m, {}).get("target", 0)
+                pocs = overall["pocs"].get(m, {}).get("actual", 0)
+                lines.append(f"  {m}: {mtgs} meetings (target {tgt}), {pocs} POCs")
+        return "\n".join(lines)
+
+    def _build_slack_recaps_ctx(recaps):
+        if not recaps:
+            return ""
+        lines = ["=== RECENT MEETING NOTES (from Slack) ==="]
+        for recap in recaps[:20]:
+            client    = recap.get("client", "")
+            date      = recap.get("date", "")
+            author    = recap.get("author", "")
+            channel   = recap.get("channel", "")
+            takeaways = recap.get("takeaways", [])
+            lines.append(f"\n{client} — {date} ({author}, {channel})")
+            for t in takeaways:
+                lines.append(f"  • {t}")
+            if not takeaways and not recap.get("missing_granola"):
+                lines.append("  [See Granola notes for details]")
+        return "\n".join(lines)
+
+    def _build_sales_system_prompt():
+        kb           = _load_alle_kb_sales()
+        slack_raw    = _fetch_slack_notes_sales()
+        pipeline_ctx = _build_sales_pipeline_ctx(df)
+        mtg_ctx      = _build_mtg_summary_ctx(msummary)
+        slack_ctx    = _build_slack_recaps_ctx(slack_raw or [])
+
+        system = """You are Graas AI, a sales assistant embedded in the All-e Sales Hub.
+You help the sales team with:
+• Customer discovery — tailoring questions to specific verticals and company profiles
+• Use case identification — matching All-e agents to the customer's biggest pain points
+• Pipeline intelligence — spotting patterns, stale deals, and follow-up priorities
+• Deal prep — value props, objection handling, and what NOT to say (and why)
+• Customer archetype matching — linking prospects to similar wins or losses we've had
+
+CRITICAL RULES — read carefully:
+1. You have access to SALES DATA ONLY. You do not have access to and must never speculate about:
+   - Finance P&L, revenue targets, or company profitability
+   - AR (Accounts Receivable) or collections data
+   - Turbo platform metrics or Hoppr seller/buyer performance data
+   - Headcount, cost, or operational budget data
+2. If asked about any of the above, respond: "That data isn't in this sales assistant — check the Command Center finance or operations tabs directly."
+3. Always ground answers in specific customers, verticals, or notes from the pipeline when possible.
+4. Be direct and commercially sharp — salespeople need action, not hedging.
+"""
+        if kb:
+            system += f"\n\n=== ALL-E KNOWLEDGE BASE ===\n{kb}\n"
+        system += f"\n\n{pipeline_ctx}\n"
+        if mtg_ctx:
+            system += f"\n\n{mtg_ctx}\n"
+        if slack_ctx:
+            system += f"\n\n{slack_ctx}\n"
+        return system
+
+    # ── Chat interface ─────────────────────────────────────────────────────────
+
+    if "alle_sales_chat" not in st.session_state:
+        st.session_state.alle_sales_chat = []
+
+    # Quick-start prompts
+    st.markdown("**💡 Try asking:**")
+    _qcols = st.columns(4)
+    _quick_prompts = [
+        "What discovery questions for a pharma brand?",
+        "Which deals need follow-up this week?",
+        "Best All-e use cases for FMCG companies?",
+        "What objections have we heard and how to handle them?",
+    ]
+    for _i, (_qc, _qp) in enumerate(zip(_qcols, _quick_prompts)):
+        with _qc:
+            if st.button(_qp, key=f"ask_sales_q{_i}"):
+                st.session_state.alle_sales_chat.append({"role": "user", "content": _qp})
+                st.rerun()
+
+    st.markdown("---")
+
+    # Display chat history
+    for _msg in st.session_state.alle_sales_chat:
+        with st.chat_message(_msg["role"]):
+            st.markdown(_msg["content"])
+
+    # Chat input
+    if _user_q := st.chat_input(
+        "Ask about All-e pipeline, discovery questions, or deal strategy...",
+        key="alle_sales_input",
+    ):
+        st.session_state.alle_sales_chat.append({"role": "user", "content": _user_q})
+        with st.chat_message("user"):
+            st.markdown(_user_q)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    import anthropic as _anthropic
+                    _api_key = (
+                        st.secrets.get("ANTHROPIC_API_KEY")
+                        if hasattr(st, "secrets") else None
+                    ) or os.getenv("ANTHROPIC_API_KEY", "")
+
+                    if not _api_key:
+                        st.error("ANTHROPIC_API_KEY not configured. Ask your admin to set it in Streamlit secrets.")
+                    else:
+                        _ai = _anthropic.Anthropic(api_key=_api_key)
+                        _sys = _build_sales_system_prompt()
+                        _msgs = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.alle_sales_chat
+                        ]
+                        _resp = _ai.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=2048,
+                            system=_sys,
+                            messages=_msgs,
+                        )
+                        _answer = _resp.content[0].text
+                        st.markdown(_answer)
+                        st.session_state.alle_sales_chat.append(
+                            {"role": "assistant", "content": _answer}
+                        )
+                except Exception as _e:
+                    st.error(f"Error calling AI: {_e}")
+
+    if st.session_state.alle_sales_chat:
+        if st.button("🗑️ Clear conversation", key="alle_sales_clear"):
+            st.session_state.alle_sales_chat = []
+            st.rerun()
+
+    # Data source info
+    with st.expander("ℹ️ What data does this assistant use?"):
+        _kb_len = len(_load_alle_kb_sales() or "")
+        st.markdown(f"""
+**Included (sales data only):**
+- ✅ All-e presales pipeline — **{len(df)} active leads**
+- ✅ GTM meeting summary (India + SEA, YTD)
+- ✅ Recent Slack meeting notes (`#ebu-offerings-gtm`, `#my-gtm-alle`)
+- ✅ All-e knowledge base ({_kb_len:,} chars)
+
+**Not included (by design — ask Command Center for these):**
+- ❌ Finance P&L or revenue data
+- ❌ AR / collections data
+- ❌ Turbo platform metrics
+- ❌ Hoppr seller/buyer performance
+        """)

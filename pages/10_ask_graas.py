@@ -32,7 +32,7 @@ def _style_citations(text: str) -> str:
 
 
 st.markdown("## 💬 Ask Graas")
-st.caption("Ask anything about your business — Finance, AR, Pipeline, Product Usage, Health Scores")
+st.caption("Ask anything about your business — Finance, AR, Pipeline, Product Usage, or All-e sales prep")
 
 # ── Check API Key ────────────────────────────────────────────────────────────
 
@@ -46,6 +46,13 @@ if not ANTHROPIC_API_KEY:
     st.warning("Add your Anthropic API key to `.env` as `ANTHROPIC_API_KEY=sk-ant-...` to enable the chat.")
     st.code("# In your .env file:\nANTHROPIC_API_KEY=sk-ant-api03-xxxxx", language="bash")
     st.stop()
+
+# ── Knowledge base doc IDs ───────────────────────────────────────────────────
+# Add any Google Doc IDs here — they'll be fetched and injected into Ask Graas.
+# The service account must have at least View access to each doc.
+KNOWLEDGE_BASE_DOCS = {
+    "alle_kb": "11-lE1Pfwf4XR_hWNwORuJund25wbKWxhOOFlZz7uX7c",
+}
 
 # ── Data Loaders ─────────────────────────────────────────────────────────────
 
@@ -240,6 +247,19 @@ def load_all_data():
         except Exception:
             pass
 
+    # ── Knowledge base docs (Google Docs) ────────────────────────────
+    try:
+        from services.sheets_client import fetch_google_doc_text
+        kb_texts = {}
+        for name, doc_id in KNOWLEDGE_BASE_DOCS.items():
+            text = fetch_google_doc_text(doc_id)
+            if text and len(text.strip()) > 100:
+                kb_texts[name] = text.strip()
+        if kb_texts:
+            summaries["knowledge_base"] = kb_texts
+    except Exception:
+        pass
+
     return summaries
 
 
@@ -313,28 +333,50 @@ def build_system_prompt(data):
                 parts.append(f"    Takeaways: {'; '.join(note['takeaways'][:5])}")
             context_parts.append("\n".join(parts))
 
+    # Knowledge base docs — injected in full (they're pre-sales reference material)
+    if "knowledge_base" in data and isinstance(data["knowledge_base"], dict):
+        kb = data["knowledge_base"]
+        if "alle_kb" in kb:
+            context_parts.append(
+                f"\n=== ALL-E SALES KNOWLEDGE BASE === [Source: Graas Knowledge Base Doc]\n"
+                f"This document contains the official product orientation, customer archetypes, "
+                f"discovery guidance, document index, and what-not-to-say guidance for pre-sales.\n\n"
+                f"{kb['alle_kb']}"
+            )
+        for name, text in kb.items():
+            if name != "alle_kb":
+                context_parts.append(f"\n=== KNOWLEDGE BASE: {name.upper()} ===\n{text}")
+
     data_context = "\n".join(context_parts)
 
     return f"""You are the Graas Command Center AI assistant. Today is {today}.
-You help the CEO and leadership team understand business performance across all functions.
+You help Graas leadership and the sales team with two things:
+1. Business performance — Finance, AR, Hoppr usage, Turbo health scores, All-e pipeline
+2. Sales preparation — discovery questions, All-e use cases, customer archetypes, objection handling, product positioning
 
-You have access to the following live data from the Graas Command Center:
+You have access to the following live data and knowledge base:
 
 {data_context}
 
 RULES:
-- Be concise and direct. The user is the CEO — don't over-explain.
+- Be concise and direct. Don't over-explain.
 - Use dollar amounts formatted with $ and commas.
 - When comparing actuals vs AOP, highlight variance and whether it's good or bad.
 - For AR, note concentration risk and overdue amounts.
 - If data is missing for a question, say so clearly.
 - Use bullet points and bold for readability.
-- GP (Gross Profit) is more important than Revenue to this CEO.
-- BUs are: ABU, EBU, Marketplace, Platform.
-- Regions: India and SEA.
+- GP (Gross Profit) is more important than Revenue.
+- BUs are: ABU, EBU, Marketplace, Platform. Regions: India and SEA.
 - When asked for a "board summary" or "brief", structure it as: GP, Revenue, EBITDA, AR, Pipeline.
-- **ALWAYS cite your source** for every claim. Use the [Source: ...] tags from the data sections above. For example: "Nerolac is at TOF stage *(Presales Tracker Sheet)* with a deep-dive meeting scheduled *(Slack GTM / Granola notes, 14 Apr)*". This lets the reader verify the information.
+- **ALWAYS cite your source** for every claim. Use the [Source: ...] tags from the data sections above.
 - When referencing meeting notes, mention the date, who posted them, and whether Granola notes exist.
+
+FOR SALES PREP QUESTIONS:
+- Draw on the All-e Sales Knowledge Base for product descriptions, customer archetypes, and positioning.
+- When asked for discovery questions, tailor them to the specific industry/vertical mentioned.
+- When asked about use cases, be specific — cite actual customers (Schneider, Canon, Nippon Paint, PI Industries, Tata 1mg, Agricon) where relevant.
+- Flag what NOT to say (e.g. don't lead with GAF/knowledge graphs in early conversations).
+- If asked to prep for a specific company in the pipeline, cross-reference the Presales Tracker for their status and last contact.
 """
 
 
@@ -344,29 +386,45 @@ RULES:
 all_data = load_all_data()
 
 # Show data status
-with st.expander("Data Sources Status", expanded=False):
+with st.expander("Data Sources", expanded=False):
     for source, data in all_data.items():
         if isinstance(data, str) and "Error" in data:
             st.error(f"**{source}**: {data}")
-        elif isinstance(data, dict):
+        elif source == "knowledge_base" and isinstance(data, dict):
+            for name, text in data.items():
+                st.success(f"**KB: {name}**: {len(text):,} chars loaded")
+        elif isinstance(data, dict) or isinstance(data, list):
             st.success(f"**{source}**: Loaded")
         else:
             st.warning(f"**{source}**: No data")
 
-# Example prompts
+# Example prompts — two rows: business + sales
 st.markdown("**Try asking:**")
 prompt_cols = st.columns(4)
 example_prompts = [
-    "Summarise our financial position for the board",
-    "Which BU has the best GP margin?",
-    "Who are our top 5 AR risks?",
-    "How is the All-e pipeline looking?",
+    "Give me a pipeline summary for Q1",
+    "Which All-e deals are closest to closing?",
+    "How are meetings tracking vs target?",
+    "Who should we follow up with this week?",
+]
+sales_prompt_cols = st.columns(4)
+sales_prompts = [
+    "What discovery questions should I ask an FMCG brand?",
+    "What's our All-e value prop vs a generic chatbot?",
+    "What customer archetypes does All-e target?",
+    "What should I NOT say in an early sales call?",
 ]
 
-# Handle example prompt clicks
+# Handle example prompt clicks — business row
 for i, prompt in enumerate(example_prompts):
     with prompt_cols[i]:
         if st.button(prompt, key=f"example_{i}", use_container_width=True):
+            st.session_state["prefill_prompt"] = prompt
+
+# Sales prep row
+for i, prompt in enumerate(sales_prompts):
+    with sales_prompt_cols[i]:
+        if st.button(prompt, key=f"sales_{i}", use_container_width=True):
             st.session_state["prefill_prompt"] = prompt
 
 st.markdown("---")

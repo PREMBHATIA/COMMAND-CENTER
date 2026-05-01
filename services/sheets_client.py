@@ -214,6 +214,44 @@ def fetch_alle_meeting_summary(force_refresh: bool = False) -> pd.DataFrame:
     return fetch_sheet_tab_raw(sheet_id, "Revised - Summary of Meetings (28 Apr)", force_refresh)
 
 
+def fetch_google_doc_text(doc_id: str, force_refresh: bool = False) -> str:
+    """Download a Google Doc as plain text via the Drive export API.
+
+    Returns the full document text, or an empty string if the service account
+    does not have access or an error occurs.  Result is cached for 4 hours.
+    """
+    cache_key = f"gdoc_{doc_id}"
+    if not force_refresh:
+        cached = _read_cache(doc_id, cache_key)
+        if cached is not None and not cached.empty:
+            # We stored the text as a single-column DataFrame
+            return cached.iloc[0, 0] if len(cached) else ""
+
+    creds = _get_service_account_creds()
+    if creds is None:
+        return ""
+
+    try:
+        import google.auth.transport.requests as greq
+        session = greq.AuthorizedSession(creds)
+        url = (
+            f"https://docs.google.com/feeds/download/documents/export/Export"
+            f"?id={doc_id}&exportFormat=txt"
+        )
+        resp = session.get(url)
+        if resp.status_code != 200:
+            return ""
+        text = resp.text
+        # Cache as a one-row DataFrame
+        try:
+            _write_cache(doc_id, cache_key, pd.DataFrame({"text": [text]}))
+        except Exception:
+            pass
+        return text
+    except Exception:
+        return ""
+
+
 def _get_service_account_creds() -> Optional[Credentials]:
     """Return service account Credentials (or None) using the same lookup as _get_client."""
     try:
